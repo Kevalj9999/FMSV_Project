@@ -1,0 +1,22 @@
+Traffic Light Controller Specification:
+
+1. On reset:
+   - state must be GREEN
+   - timer must be 0
+
+2. Highway light rules:
+   - GREEN: highway is green, farm is red
+   - YELLOW: highway is yellow, farm is red
+   - RED: highway is red, farm is green
+
+3. Transition rules:
+   - If sensor is active, GREEN lasts for 5 cycles
+   - YELLOW lasts for 2 cycles
+   - RED lasts for 5 cycles
+
+4. Timer behavior:
+   - Timer increments every cycle in a state
+   - Timer resets on state change
+
+5. Safety rules:
+   - Highway and farm should never be GREEN at same time

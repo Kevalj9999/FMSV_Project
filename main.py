@@ -27,6 +27,7 @@ def load_rtl_code(rtl_files):
 def filter_targets(targets):
     filtered = []
     for t in targets:
+        # Skip memory-related signals (not useful for assertions)
         if any(keyword in t.lower() for keyword in ["mem", "memory"]):
             continue
         filtered.append(t)
@@ -38,9 +39,10 @@ def main():
     spec_file = "spec/spec.txt"
 
     rtl_files = get_rtl_files(rtl_folder)
+    print(f"Found {len(rtl_files)} RTL files")
 
-    print("Parsing RTL files...")
-    ast = parse_rtl(rtl_files)
+    print("Parsing RTL files (incremental mode - memory efficient)...")
+    ast = parse_rtl(rtl_files, incremental=True)
 
     print("Building dependency graph...")
     graph = build_dependency_graph(ast)
@@ -51,7 +53,7 @@ def main():
         if i >= 20:
             break
 
-    # Extract targets
+    # -------- TARGET EXTRACTION --------
     raw_targets = extract_targets(ast)
     targets = filter_targets(raw_targets)
 
@@ -59,9 +61,10 @@ def main():
     for t in targets:
         print(t)
 
-    # Load RTL code
+    # -------- LOAD RTL --------
     rtl_code = load_rtl_code(rtl_files)
 
+    # -------- CONE EXTRACTION --------
     print("\n--- Register Cones ---\n")
     cones = {}
 
@@ -72,44 +75,49 @@ def main():
         print(f"\nTarget: {target}")
         print("Cone:", list(cone))
 
+    # -------- CONTEXT EXTRACTION --------
     print("\n--- Context Extraction ---\n")
     contexts = {}
 
     for target in targets:
-        context = build_context(rtl_code, cones[target])
+        context = build_context(rtl_code, cones[target], target)
         contexts[target] = context
 
         print(f"\nTarget: {target}")
         print("Context:\n", context)
 
-    # Load specification
+    # -------- LOAD SPEC --------
     with open(spec_file, "r") as f:
         spec = f.read()
 
     print("\n--- Combined Context Assertion Generation ---\n")
 
-    # ✅ Use ALL targets (works for any RTL, not just FIFO)
-    combined_context = ""
+    # -------- DEDUPLICATE CONTEXT --------
+    unique_contexts = set()
 
     for t in targets:
-        combined_context += contexts.get(t, "") + "\n"
+        ctx = contexts.get(t, "").strip()
+        if ctx:
+            unique_contexts.add(ctx)
 
-    # ✅ Safety check
+    combined_context = "\n\n".join(unique_contexts)
+
+    # -------- SAFETY CHECK --------
     if not combined_context.strip():
         print("No valid context found ❌")
         return
 
-    # ✅ Debug
+    # -------- DEBUG --------
     print("\n--- COMBINED CONTEXT ---\n")
     print(combined_context)
 
-    # ✅ Extract signals from combined context (CORRECT)
+    # -------- SIGNAL EXTRACTION --------
     signals = extract_signals(combined_context)
 
     print("\n--- EXTRACTED SIGNALS ---\n")
     print(signals)
 
-    # ✅ Generate assertions
+    # -------- ASSERTION GENERATION --------
     assertions = generate_assertions(combined_context, spec, signals)
 
     print("\n--- FINAL ASSERTIONS ---\n")

@@ -1,22 +1,13 @@
-Traffic Light Controller Specification:
+FIFO Specification:
 
-1. On reset:
-   - state must be GREEN
-   - timer must be 0
-
-2. Highway light rules:
-   - GREEN: highway is green, farm is red
-   - YELLOW: highway is yellow, farm is red
-   - RED: highway is red, farm is green
-
-3. Transition rules:
-   - If sensor is active, GREEN lasts for 5 cycles
-   - YELLOW lasts for 2 cycles
-   - RED lasts for 5 cycles
-
-4. Timer behavior:
-   - Timer increments every cycle in a state
-   - Timer resets on state change
-
-5. Safety rules:
-   - Highway and farm should never be GREEN at same time
+1. FIFO stores up to DEPTH elements.
+2. Write occurs when wr_en is high and FIFO is not full.
+3. Read occurs when rd_en is high and FIFO is not empty.
+4. FIFO must not overflow (no write when full).
+5. FIFO must not underflow (no read when empty).
+6. Data must be read in the same order it was written (FIFO order).
+7. full signal must be high when FIFO is full.
+8. empty signal must be high when FIFO is empty.
+9. write pointer increments on successful write.
+10. read pointer increments on successful read.
+11. count tracks number of elements in FIFO.

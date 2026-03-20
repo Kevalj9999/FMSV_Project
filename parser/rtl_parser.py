@@ -82,6 +82,10 @@ class RTLParser:
                 continue
 
             for definition in ast.description.definitions:
+                # Ensure it's a list before appending
+                if isinstance(combined.description.definitions, tuple):
+                    combined.description.definitions = list(combined.description.definitions)
+
                 combined.description.definitions.append(definition)
 
         return combined

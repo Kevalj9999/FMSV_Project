@@ -10,7 +10,7 @@ client = OpenAI(
 )
 
 
-def generate_assertions(context, spec, signals):
+def generate_assertions(context, spec, signals,target):
 
     prompt = f"""
 You are an expert in SystemVerilog Assertions (SVA) and RTL verification.
@@ -64,6 +64,49 @@ STRICT RULES (MANDATORY)
 26. When asserting outputs like full/empty:
     - Prefer direct equivalence:
         (count == DEPTH) |-> (full == 1)
+27. ONLY generate assertions for the CURRENT TARGET signal.
+
+28. DO NOT generate assertions for unrelated signals even if present in context.
+
+29. The target signal is:
+{target}
+30. For memory reads:
+    If RTL has: data_out <= mem[rd_ptr]
+    Then assertion MUST be:
+        data_out == mem[$past(rd_ptr)]
+    NOT:
+        $past(mem[rd_ptr])
+31. DO NOT convert assignments like:
+        if (!full) wr_en <= 1;
+    into strict guarantees like:
+        (!full) |-> (wr_en == 1)
+
+    Only assert behavior of registers being assigned,
+    NOT control policy decisions.
+32. For every condition-based assignment:
+    Generate BOTH:
+        condition true → value
+        condition false → opposite value
+33. For memory reads:
+    If RTL has: data_out <= mem[rd_ptr]
+    Then assertion MUST be:
+        data_out == mem[$past(rd_ptr)]
+34. DO NOT generate assertions enforcing control decisions.
+
+    Example:
+        if (!full) wr_en <= 1;
+
+    DO NOT convert into:
+        (!full) |-> (wr_en == 1)
+
+    Only assert:
+        - register updates
+        - state transitions
+        - data movement
+
+    NEVER:
+        $past(mem[rd_ptr])
+        $past(mem[$past(rd_ptr)])
 
 ----------------------------------------
 TIMING RULES (CRITICAL)

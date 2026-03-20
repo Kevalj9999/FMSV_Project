@@ -1,13 +1,29 @@
-FIFO Specification:
+FIFO System Specification:
 
-1. FIFO stores up to DEPTH elements.
-2. Write occurs when wr_en is high and FIFO is not full.
-3. Read occurs when rd_en is high and FIFO is not empty.
-4. FIFO must not overflow (no write when full).
-5. FIFO must not underflow (no read when empty).
-6. Data must be read in the same order it was written (FIFO order).
-7. full signal must be high when FIFO is full.
-8. empty signal must be high when FIFO is empty.
-9. write pointer increments on successful write.
-10. read pointer increments on successful read.
-11. count tracks number of elements in FIFO.
+1. On reset:
+   - wr_ptr = 0
+   - rd_ptr = 0
+   - count = 0
+   - full = 0
+   - empty = 1
+
+2. Write operation:
+   - If wr_en == 1 and full == 0:
+       wr_ptr increments
+       count increments
+
+3. Read operation:
+   - If rd_en == 1 and empty == 0:
+       rd_ptr increments
+       data_out gets mem[rd_ptr]
+       count decrements
+
+4. Full condition:
+   - full == 1 when count == 15
+
+5. Empty condition:
+   - empty == 1 when count == 0
+
+6. Controller:
+   - wr_en is 1 when not full
+   - rd_en is 1 when not empty

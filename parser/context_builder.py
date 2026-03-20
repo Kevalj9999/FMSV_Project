@@ -6,69 +6,90 @@ input clk;
 input reset;
 """
 
-    # -------- STEP 1: Extract always blocks --------
-    blocks = []
-    current_block = []
-    inside = False
-    depth = 0
+    # -------- STEP 1: Extract COMPLETE always blocks (FIXED) --------
+    def extract_blocks(lines):
+        blocks = []
+        current = []
+        inside = False
+        depth = 0
 
-    for line in lines:
-        stripped = line.strip()
+        for line in lines:
+            stripped = line.strip()
 
-        if "always" in stripped:
-            inside = True
-            depth = 0
-            current_block = [line]
-            continue
+            if "always" in stripped:
+                inside = True
+                depth = 0
+                current = [line]
+                continue
 
-        if inside:
-            current_block.append(line)
+            if inside:
+                current.append(line)
 
-            if "begin" in stripped:
-                depth += 1
-            if "end" in stripped:
-                depth -= 1
+                # Track begin-end properly
+                if "begin" in stripped:
+                    depth += 1
+                if "end" in stripped:
+                    depth -= 1
 
-            if depth <= 0 and "end" in stripped:
-                blocks.append("\n".join(current_block))
-                inside = False
+                # Close block only when fully balanced
+                if depth <= 0 and stripped == "end":
+                    blocks.append("\n".join(current))
+                    inside = False
 
-    # -------- STEP 2: relevance check --------
-    def contains_cone_signal(line):
-        return any(sig in line for sig in cone)
+        return blocks
 
+    blocks = extract_blocks(lines)
+
+    # -------- STEP 2: helpers --------
     def is_structure(line):
-        keywords = ["if", "else", "case", "endcase", "begin", "end"]
+        keywords = ["if", "else", "case", "endcase", "begin", "end", "always"]
         return any(k in line for k in keywords)
 
     def is_assignment(line):
         return "<=" in line or "=" in line
 
-    # -------- STEP 3: smart slicing --------
+    def is_target_assignment(line, target):
+        return f"{target} <=" in line or f"{target} =" in line
+
+    def contains_target(line):
+        return target in line
+
+    # -------- STEP 3: TARGET-FOCUSED slicing --------
     sliced_blocks = []
 
     for block in blocks:
-        keep_block = False
         new_block = []
+        keep_block = False
 
         for line in block.split("\n"):
             stripped = line.strip()
 
-            # Keep structure always (important for correctness)
+            # Always keep structure (prevents broken RTL)
             if is_structure(stripped):
                 new_block.append(line)
                 continue
 
-            # Keep lines involving ANY cone signal
-            if contains_cone_signal(stripped):
+            # Keep ONLY assignments of target
+            if is_assignment(stripped) and is_target_assignment(stripped, target):
                 new_block.append(line)
                 keep_block = True
                 continue
 
+            # Keep conditions involving target
+            # Keep assignments even if not directly target, if inside useful block
+            if is_assignment(stripped):
+                new_block.append(line)
+                continue
+
+            # Keep conditions related to cone (NOT just target)
+            if any(sig in stripped for sig in cone):
+                new_block.append(line)
+
+        # Only keep meaningful blocks
         if keep_block:
             sliced_blocks.append("\n".join(new_block))
 
-    # -------- STEP 4: deduplicate --------
+    # -------- STEP 4: Deduplicate --------
     unique_blocks = []
     seen = set()
 
@@ -78,12 +99,13 @@ input reset;
             seen.add(key)
             unique_blocks.append(block)
 
-    # -------- STEP 5: FINAL FILTER (important) --------
-    # Only keep blocks where TARGET is actually assigned
+    # -------- STEP 5: FINAL FILTER --------
+    # Ensure target is actually assigned (STRICT)
     final_blocks = []
 
     for block in unique_blocks:
-        if target in block:
+        if any(is_target_assignment(line, target) for line in block.split("\n")):
             final_blocks.append(block)
 
+    # -------- STEP 6: RETURN --------
     return header + "\n\n".join(final_blocks)

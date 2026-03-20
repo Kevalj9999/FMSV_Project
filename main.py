@@ -1,4 +1,5 @@
 import os
+from sys import modules
 from parser.rtl_parser import parse_rtl
 from parser.dependency_extractor import build_dependency_graph
 from parser.target_selector import extract_targets
@@ -8,6 +9,8 @@ from llm.generator import generate_assertions
 from llm.generator import clean_assertions
 from parser.signal_extractor import extract_signals
 from utils.assertion_cleaner import clean_assertions
+from parser.module_extractor import extract_modules
+from parser.global_dependency import build_global_graph
 
 
 def get_rtl_files(folder):
@@ -56,7 +59,17 @@ def main():
     ast = parse_rtl(rtl_files, incremental=True)
 
     print("Building dependency graph...")
-    graph = build_dependency_graph(ast)
+    # Load RTL code
+    rtl_code = load_rtl_code(rtl_files)
+
+    # Extract modules
+    modules = extract_modules(rtl_code)
+
+    # Build local graph
+    local_graph = build_dependency_graph(ast)
+
+    # Build global graph (NEW)
+    graph = build_global_graph(local_graph, modules)
 
     print("\n--- Dependency Graph (Sample) ---\n")
     for i, (target, deps) in enumerate(graph.items()):
@@ -125,7 +138,7 @@ def main():
         print(signals)
 
         # Generate assertions for this target
-        raw_assertions = generate_assertions(context, spec, signals)
+        raw_assertions = generate_assertions(context, spec, signals,target)
         cleaned_assertions = clean_assertions(raw_assertions)
 
         print("\n--- Assertions ---\n")

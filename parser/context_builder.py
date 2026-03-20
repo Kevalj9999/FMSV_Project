@@ -1,4 +1,4 @@
-def build_context(rtl_code, cone, target=None):
+def build_context(rtl_code, cone, target):
     lines = rtl_code.split("\n")
 
     header = """
@@ -33,64 +33,42 @@ input reset;
                 blocks.append("\n".join(current_block))
                 inside = False
 
-    # -------- STEP 2: Behavioral slicing --------
+    # -------- STEP 2: relevance check --------
+    def contains_cone_signal(line):
+        return any(sig in line for sig in cone)
 
     def is_structure(line):
-        keywords = ["if", "else", "case", "endcase", "begin", "end", "always"]
+        keywords = ["if", "else", "case", "endcase", "begin", "end"]
         return any(k in line for k in keywords)
 
     def is_assignment(line):
         return "<=" in line or "=" in line
 
-    def is_behaviorally_relevant(line, target):
-        if target is None:
-            return True
-
-        # Direct assignment to target
-        if target in line and is_assignment(line):
-            return True
-
-        # Conditions controlling logic
-        if "if" in line or "case" in line:
-            return True
-
-        # Control signals (generic)
-        control_keywords = [
-            "wr_en", "rd_en", "enable", "valid", "ready",
-            "start", "done"
-        ]
-        if any(k in line for k in control_keywords):
-            return True
-
-        return False
-
+    # -------- STEP 3: smart slicing --------
     sliced_blocks = []
 
     for block in blocks:
-        new_block = []
         keep_block = False
+        new_block = []
 
         for line in block.split("\n"):
             stripped = line.strip()
 
-            # Always keep structure
+            # Keep structure always (important for correctness)
             if is_structure(stripped):
                 new_block.append(line)
                 continue
 
-            # Keep only behaviorally relevant lines
-            if is_behaviorally_relevant(stripped, target):
+            # Keep lines involving ANY cone signal
+            if contains_cone_signal(stripped):
                 new_block.append(line)
+                keep_block = True
+                continue
 
-                # Only mark useful if target actually appears
-                if target and target in stripped:
-                    keep_block = True
-
-        # Keep block only if target appears inside
         if keep_block:
             sliced_blocks.append("\n".join(new_block))
 
-    # -------- STEP 3: Deduplicate --------
+    # -------- STEP 4: deduplicate --------
     unique_blocks = []
     seen = set()
 
@@ -100,4 +78,12 @@ input reset;
             seen.add(key)
             unique_blocks.append(block)
 
-    return header + "\n\n".join(unique_blocks)
+    # -------- STEP 5: FINAL FILTER (important) --------
+    # Only keep blocks where TARGET is actually assigned
+    final_blocks = []
+
+    for block in unique_blocks:
+        if target in block:
+            final_blocks.append(block)
+
+    return header + "\n\n".join(final_blocks)

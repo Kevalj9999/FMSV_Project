@@ -38,6 +38,33 @@ STRICT RULES (MANDATORY)
    - control conditions
    - safety constraints
 
+6. DO NOT generate tautological assertions like:
+  (x == 1) |=> (x == 1)
+  (x == 0) |=> (x == 0)s
+
+7. DO NOT infer relationships not explicitly present in RTL
+8. NEVER assume behavior based on intuition (e.g., empty → pointer reset)
+9. ONLY generate assertions for signals present in the CURRENT context.
+10. DO NOT generate assertions for unrelated signals.
+11. DO NOT infer behavior not explicitly written in RTL.
+12. DO NOT generate inequality-based behavior (like !=) unless explicitly present.
+13. Avoid redundant assertions (same logic written differently).
+14. Each assertion must directly map to a line in RTL.
+15. ONLY generate assertions directly related to the current target signal.
+16. DO NOT generate assertions for unrelated registers.
+17. If the target is an output (like full/empty), focus on its defining logic.
+18. If the target is a counter/pointer, focus on its update behavior.
+19. DO NOT generate tautologies (always true conditions).
+20. DO NOT generate assertions that simplify to constants.
+21. Each assertion must enforce a meaningful design constraint.
+22. Generate ONLY assertions that directly define the target signal behavior.
+23. DO NOT generate assertions for other signals in the same context.
+24. Avoid repeating reset assertions across multiple targets.
+25. Prefer simple and minimal conditions over complex boolean expressions.
+26. When asserting outputs like full/empty:
+    - Prefer direct equivalence:
+        (count == DEPTH) |-> (full == 1)
+
 ----------------------------------------
 TIMING RULES (CRITICAL)
 ----------------------------------------
@@ -114,6 +141,9 @@ MEMORY RULES (CRITICAL)
 2. If behavior depends on memory:
    → SKIP that assertion
 
+3. NEVER use memory signals (mem, array access)
+- SKIP data-path assertions involving memory
+
 ----------------------------------------
 SIMPLICITY RULES
 ----------------------------------------
@@ -180,3 +210,28 @@ Generate assertions now.
     )
 
     return response.choices[0].message.content
+
+def clean_assertions(assertions):
+    cleaned = []
+
+    for line in assertions.split("\n"):
+        l = line.strip()
+
+        if not l:
+            continue
+
+        # remove invalid implication
+        if "|=>" in l and l.startswith("!"):
+            continue
+
+        # remove inequality hallucinations
+        if "!=" in l:
+            continue
+
+        # remove trivial self assertions
+        if "== $past(" in l and "+ 0" in l:
+            continue
+
+        cleaned.append(l)
+
+    return "\n".join(cleaned)

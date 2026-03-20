@@ -5,49 +5,52 @@ def extract_signals(context):
 
     # -------- INPUTS --------
     signals.update(re.findall(
-        r'input\s+(?:\[\d+:\d+\]\s+)?(\w+)', context))
+        r'\binput\s+(?:\[\d+:\d+\]\s+)?(\w+)', context))
 
     # -------- OUTPUTS --------
     signals.update(re.findall(
-        r'output\s+(?:reg\s+)?(?:\[\d+:\d+\]\s+)?(\w+)', context))
+        r'\boutput\s+(?:reg\s+)?(?:\[\d+:\d+\]\s+)?(\w+)', context))
 
     # -------- REGS --------
     signals.update(re.findall(
-        r'reg\s+(?:\[\d+:\d+\]\s+)?(\w+)', context))
+        r'\breg\s+(?:\[\d+:\d+\]\s+)?(\w+)', context))
 
-    # -------- PARAMETERS (FSM states etc.) --------
+    # -------- PARAMETERS --------
     signals.update(re.findall(
-        r'parameter\s+(\w+)', context))
+        r'\bparameter\s+(\w+)', context))
 
     # -------- LHS ASSIGNMENTS --------
     signals.update(re.findall(
         r'\b(\w+)\s*<=', context))
 
-    # -------- RHS SIGNALS (IMPORTANT ADDITION) --------
-    signals.update(re.findall(
-        r'<=\s*(\w+)', context))
+    # -------- RHS EXPRESSIONS (ROBUST) --------
+    rhs_expressions = re.findall(r'<=\s*(.*?);', context)
+    for expr in rhs_expressions:
+        tokens = re.findall(r'\b[a-zA-Z_]\w*\b', expr)
+        signals.update(tokens)
 
-    # -------- CONDITIONS --------
-    signals.update(re.findall(
-        r'\bif\s*\((.*?)\)', context))
+    # -------- CONDITIONS (if, case, ternary) --------
+    condition_exprs = re.findall(r'\bif\s*\((.*?)\)', context)
+    condition_exprs += re.findall(r'\bcase\s*\((.*?)\)', context)
 
-    # Flatten condition signals
-    condition_signals = set()
-    for cond in list(signals):
-        if " " in cond or "&&" in cond or "||" in cond:
-            tokens = re.findall(r'\b\w+\b', cond)
-            condition_signals.update(tokens)
-            signals.discard(cond)
+    for expr in condition_exprs:
+        tokens = re.findall(r'\b[a-zA-Z_]\w*\b', expr)
+        signals.update(tokens)
 
-    signals.update(condition_signals)
+    # -------- MEMORY INDEXING (mem[rd_ptr]) --------
+    mem_indices = re.findall(r'\b(\w+)\[(\w+)\]', context)
+    for mem, idx in mem_indices:
+        signals.add(mem)
+        signals.add(idx)
 
     # -------- CLEANUP --------
-    # Remove numbers and keywords
     blacklist = {
         "if", "else", "case", "begin", "end",
-        "posedge", "negedge"
+        "posedge", "negedge",
+        "default"
     }
 
+    # Remove numbers and keywords
     signals = {
         s for s in signals
         if not s.isdigit() and s not in blacklist

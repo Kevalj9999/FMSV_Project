@@ -5,7 +5,9 @@ from parser.target_selector import extract_targets
 from parser.cone_extractor import extract_cone
 from parser.context_builder import build_context
 from llm.generator import generate_assertions
+from llm.generator import clean_assertions
 from parser.signal_extractor import extract_signals
+from utils.assertion_cleaner import clean_assertions
 
 
 def get_rtl_files(folder):
@@ -27,11 +29,20 @@ def load_rtl_code(rtl_files):
 def filter_targets(targets):
     filtered = []
     for t in targets:
-        # Skip memory-related signals (not useful for assertions)
+        # Skip memory-related signals
         if any(keyword in t.lower() for keyword in ["mem", "memory"]):
             continue
         filtered.append(t)
     return filtered
+
+
+def is_control_target(t):
+    """
+    Optional: keep only meaningful verification targets
+    Helps scaling for large RTL like OpenMSP
+    """
+    keywords = ["ptr", "count", "state", "ctrl", "flag", "valid", "ready"]
+    return any(k in t.lower() for k in keywords)
 
 
 def main():
@@ -56,6 +67,12 @@ def main():
     # -------- TARGET EXTRACTION --------
     raw_targets = extract_targets(ast)
     targets = filter_targets(raw_targets)
+
+    # OPTIONAL: Enable this for large RTL (OpenMSP)
+    # targets = [t for t in targets if is_control_target(t)]
+
+    # OPTIONAL: limit targets for LLM cost/control
+    # targets = targets[:5]
 
     print("\n--- Targets ---\n")
     for t in targets:
@@ -90,38 +107,29 @@ def main():
     with open(spec_file, "r") as f:
         spec = f.read()
 
-    print("\n--- Combined Context Assertion Generation ---\n")
+    # -------- PER-TARGET ASSERTION GENERATION --------
+    print("\n--- FINAL ASSERTIONS (PER TARGET) ---\n")
 
-    # -------- DEDUPLICATE CONTEXT --------
-    unique_contexts = set()
+    for target in targets:
+        context = contexts.get(target, "").strip()
 
-    for t in targets:
-        ctx = contexts.get(t, "").strip()
-        if ctx:
-            unique_contexts.add(ctx)
+        if not context:
+            continue
 
-    combined_context = "\n\n".join(unique_contexts)
+        print(f"\n===== TARGET: {target} =====\n")
 
-    # -------- SAFETY CHECK --------
-    if not combined_context.strip():
-        print("No valid context found ❌")
-        return
+        # Extract signals ONLY for this context
+        signals = extract_signals(context)
 
-    # -------- DEBUG --------
-    print("\n--- COMBINED CONTEXT ---\n")
-    print(combined_context)
+        print("--- Signals ---")
+        print(signals)
 
-    # -------- SIGNAL EXTRACTION --------
-    signals = extract_signals(combined_context)
+        # Generate assertions for this target
+        raw_assertions = generate_assertions(context, spec, signals)
+        cleaned_assertions = clean_assertions(raw_assertions)
 
-    print("\n--- EXTRACTED SIGNALS ---\n")
-    print(signals)
-
-    # -------- ASSERTION GENERATION --------
-    assertions = generate_assertions(combined_context, spec, signals)
-
-    print("\n--- FINAL ASSERTIONS ---\n")
-    print(assertions)
+        print("\n--- Assertions ---\n")
+        print(cleaned_assertions)
 
 
 if __name__ == "__main__":

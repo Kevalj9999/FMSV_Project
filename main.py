@@ -1,16 +1,43 @@
 import os
-from sys import modules
 from parser.rtl_parser import parse_rtl
 from parser.dependency_extractor import build_dependency_graph
 from parser.target_selector import extract_targets
 from parser.cone_extractor import extract_cone
 from parser.context_builder import build_context
 from llm.generator import generate_assertions
-from llm.generator import clean_assertions
 from parser.signal_extractor import extract_signals
 from utils.assertion_cleaner import clean_assertions
 from parser.module_extractor import extract_modules
 from parser.global_dependency import build_global_graph
+
+
+# -------- FIX 3: Derived signal detection --------
+def find_derived_signals(graph):
+    derived = set()
+
+    for target, deps in graph.items():
+        # remove reset/clk
+        filtered = [d for d in deps if d not in ("reset", "clk")]
+
+        # ❗ Skip control-like signals
+        if target in ["wr_en", "rd_en"]:
+            continue
+
+        # ❗ Skip pointer/data signals
+        if any(k in target.lower() for k in ["ptr", "data"]):
+            continue
+
+        # Only single real dependency → derived
+        if len(filtered) == 1:
+            derived.add(target)
+
+    return derived
+
+
+def remove_self_dependencies(graph):
+    for node in graph:
+        graph[node] = set(d for d in graph[node] if d != node)
+    return graph
 
 
 def get_rtl_files(folder):
@@ -31,19 +58,30 @@ def load_rtl_code(rtl_files):
 
 def filter_targets(targets):
     filtered = []
+
     for t in targets:
-        # Skip memory-related signals
-        if any(keyword in t.lower() for keyword in ["mem", "memory"]):
+        t_lower = t.lower()
+
+        # ❌ Skip memory/internal signals
+        if "mem" in t_lower or "memory" in t_lower:
             continue
-        filtered.append(t)
+
+        # ❌ Skip pure control signals
+        if t_lower in ["wr_en", "rd_en"]:
+            continue
+
+        # ❌ Skip derived flags
+        if t_lower in ["full", "empty"]:
+            continue
+
+        # ✅ Keep important verification signals
+        if any(k in t_lower for k in ["ptr", "count", "data"]):
+            filtered.append(t)
+
     return filtered
 
 
 def is_control_target(t):
-    """
-    Optional: keep only meaningful verification targets
-    Helps scaling for large RTL like OpenMSP
-    """
     keywords = ["ptr", "count", "state", "ctrl", "flag", "valid", "ready"]
     return any(k in t.lower() for k in keywords)
 
@@ -59,17 +97,27 @@ def main():
     ast = parse_rtl(rtl_files, incremental=True)
 
     print("Building dependency graph...")
-    # Load RTL code
-    rtl_code = load_rtl_code(rtl_files)
 
-    # Extract modules
+    rtl_code = load_rtl_code(rtl_files)
     modules = extract_modules(rtl_code)
 
-    # Build local graph
+    # -------- LOCAL GRAPH --------
     local_graph = build_dependency_graph(ast)
 
-    # Build global graph (NEW)
+    # -------- FIX 1 --------
+    local_graph = remove_self_dependencies(local_graph)
+
+    # -------- GLOBAL GRAPH --------
     graph = build_global_graph(local_graph, modules)
+
+    # -------- CLEAN GLOBAL GRAPH --------
+    graph = remove_self_dependencies(graph)
+
+    # -------- FIX 3: DERIVED SIGNALS --------
+    derived_signals = find_derived_signals(local_graph)
+
+    print("\n--- Derived Signals ---\n")
+    print(sorted(derived_signals))
 
     print("\n--- Dependency Graph (Sample) ---\n")
     for i, (target, deps) in enumerate(graph.items()):
@@ -81,29 +129,25 @@ def main():
     raw_targets = extract_targets(ast)
     targets = filter_targets(raw_targets)
 
-    # OPTIONAL: Enable this for large RTL (OpenMSP)
-    # targets = [t for t in targets if is_control_target(t)]
-
-    # OPTIONAL: limit targets for LLM cost/control
-    # targets = targets[:5]
-
     print("\n--- Targets ---\n")
     for t in targets:
         print(t)
-
-    # -------- LOAD RTL --------
-    rtl_code = load_rtl_code(rtl_files)
 
     # -------- CONE EXTRACTION --------
     print("\n--- Register Cones ---\n")
     cones = {}
 
     for target in targets:
-        cone = extract_cone(graph, target)
+        cone = extract_cone(graph, target, max_depth=2)
+
+        # -------- FIX 3 APPLY --------
+        cone = [s for s in cone if s not in derived_signals]
+
         cones[target] = cone
 
         print(f"\nTarget: {target}")
         print("Cone:", list(cone))
+        print("Cone size:", len(cone))
 
     # -------- CONTEXT EXTRACTION --------
     print("\n--- Context Extraction ---\n")
@@ -120,30 +164,29 @@ def main():
     with open(spec_file, "r") as f:
         spec = f.read()
 
-    # -------- PER-TARGET ASSERTION GENERATION --------
-    print("\n--- FINAL ASSERTIONS (PER TARGET) ---\n")
+    # (assertion generation still commented)
+    # print("\n--- FINAL ASSERTIONS (PER TARGET) ---\n")
 
-    for target in targets:
-        context = contexts.get(target, "").strip()
+    # for target in targets:
+    #     context = contexts.get(target, "").strip()
 
-        if not context:
-            continue
+    #     if not context:
+    #         continue
 
-        print(f"\n===== TARGET: {target} =====\n")
+    #     print(f"\n===== TARGET: {target} =====\n")
 
-        # Extract signals ONLY for this context
-        signals = extract_signals(context)
+    #     # Extract signals ONLY for this context
+    #     signals = extract_signals(context)
 
-        print("--- Signals ---")
-        print(signals)
+    #     print("--- Signals ---")
+    #     print(signals)
 
-        # Generate assertions for this target
-        raw_assertions = generate_assertions(context, spec, signals,target)
-        cleaned_assertions = clean_assertions(raw_assertions)
+    #     # Generate assertions for this target
+    #     raw_assertions = generate_assertions(context, spec, signals,target)
+    #     cleaned_assertions = clean_assertions(raw_assertions)
 
-        print("\n--- Assertions ---\n")
-        print(cleaned_assertions)
-
+    #     print("\n--- Assertions ---\n")
+    #     print(cleaned_assertions)
 
 if __name__ == "__main__":
     main()

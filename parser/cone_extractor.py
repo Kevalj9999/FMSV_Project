@@ -17,46 +17,57 @@ def score_signal(signal):
     return score
 
 
-def extract_smart_cone(graph, target, max_depth=5, max_paths=25):
+def rank_deps(deps):
+    def score(s):
+        score = 0
+        if "count" in s: score += 3
+        if "ptr" in s: score += 2
+        if "data" in s: score += 2
+        if "en" in s: score += 1
+        return score
+
+    return sorted(deps, key=score, reverse=True)
+
+
+def extract_smart_cone(graph, target, max_depth=4, max_paths=25):
     paths = []
+    visited = set()
 
     def dfs(node, path, depth):
-        if depth > max_depth or len(paths) >= max_paths:
+        # Stop conditions
+        if depth > max_depth:
             return
 
-        path.append(node)
+        if len(paths) >= max_paths:
+            return
 
-        if node not in graph or len(graph[node]) == 0:
-            paths.append(path.copy())
-        else:
-            # Sort dependencies by importance
-            deps = sorted(
-                graph[node],
-                key=lambda x: -score_signal(x)
-            )
+        visited.add(node)
+        paths.append(path.copy())
 
-            # Limit branching (VERY IMPORTANT)
-            for dep in deps[:5]:
-                if dep not in path:  # avoid cycles
-                    dfs(dep, path, depth + 1)
+        # 🔥 IMPORTANT: ranked + limited branching
+        for dep in rank_deps(graph.get(node, []))[:4]:
+            if dep not in path:  # avoid cycles per path
+                dfs(dep, path + [dep], depth + 1)
 
-        path.pop()
+    # Start DFS
+    dfs(target, [target], 0)
 
-    dfs(target, [], 0)
-
-    # Build cone from paths
+    # -------- Build cone --------
     cone = set()
     for p in paths:
         cone.update(p)
 
-    # Remove noise
+    # -------- Remove noise --------
     cone = {
         s for s in cone
         if '.' in s and not s.endswith(("clk", "reset"))
     }
 
+    # -------- Sort cone (important for consistency) --------
+    cone = sorted(cone, key=lambda x: -score_signal(x))
+
     return {
         "target": target,
-        "paths": paths,
-        "cone": list(cone)
+        "paths": paths[:max_paths],
+        "cone": cone
     }

@@ -89,7 +89,9 @@ input reset;
                 new_block.append(line)
 
         if keep_block:
-            sliced_blocks.append("\n".join(new_block))
+            # Only keep small blocks
+            if len(block.split("\n")) < 80:
+                sliced_blocks.append(block)
 
     # -------- STEP 4: Deduplicate --------
     unique_blocks = []

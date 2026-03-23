@@ -1,80 +1,106 @@
 from pyverilog.vparser.parser import parse
-import json
 import hashlib
 import os
+import re
+import tempfile
+import pickle
 
 
 class RTLParser:
-    """Incremental RTL parser with caching for scalability"""
-    
+    """Incremental RTL parser with preprocessing + caching for scalability"""
+
     def __init__(self, cache_dir=".rtl_cache"):
         self.cache_dir = cache_dir
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir)
-    
+
+    # -------- PREPROCESSING --------
+    def preprocess_rtl(self, text):
+        # Remove trailing commas in parameter lists
+        text = re.sub(r",\s*\)", ")", text)
+
+        # Remove generate/endgenerate (basic handling)
+        text = text.replace("generate", "")
+        text = text.replace("endgenerate", "")
+
+        # Remove attributes (* ... *)
+        text = re.sub(r"\(\*.*?\*\)", "", text)
+
+        return text
+
+    # -------- CACHE HELPERS --------
     def get_file_hash(self, filepath):
-        """Get hash of file content for cache validation"""
         with open(filepath, 'rb') as f:
             return hashlib.md5(f.read()).hexdigest()
-    
+
     def get_cache_key(self, filepath):
-        """Generate cache filename for a RTL file"""
         filename = os.path.basename(filepath)
         file_hash = self.get_file_hash(filepath)
         return os.path.join(self.cache_dir, f"{filename}_{file_hash}.cache")
-    
+
+    # -------- CORE PARSER --------
     def parse_single_file(self, filepath):
         """
-        Parse a single RTL file with caching.
+        Parse a single RTL file with preprocessing + caching.
         Returns: (ast, metadata)
         """
         cache_file = self.get_cache_key(filepath)
-        
-        # Check if cached
+
+        # Load from cache if exists
         if os.path.exists(cache_file):
             with open(cache_file, 'rb') as f:
-                import pickle
                 return pickle.load(f)
-        
-        # Parse file
+
         try:
+            # -------- READ + PREPROCESS --------
+            with open(filepath, "r") as f:
+                raw_code = f.read()
+
+            clean_code = self.preprocess_rtl(raw_code)
+
+            # -------- WRITE TEMP FILE --------
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".v") as tmp:
+                tmp.write(clean_code.encode())
+                tmp_path = tmp.name
+
+            # -------- PARSE CLEAN FILE --------
             ast, directives = parse(
-                [filepath],
+                [tmp_path],
                 preprocess_include=['rtl'],
                 preprocess_define=[]
             )
-            
-            # Cache result
-            import pickle
+
+            # -------- CACHE RESULT --------
             with open(cache_file, 'wb') as f:
                 pickle.dump((ast, directives), f)
-            
+
             return ast, directives
+
         except Exception as e:
             print(f"Warning: Failed to parse {filepath}: {e}")
             return None, None
-    
+
+    # -------- INCREMENTAL PARSING --------
     def parse_rtl_incremental(self, file_list):
         """
         Parse RTL files incrementally and return combined AST.
-        More memory efficient than parsing all at once.
         """
         asts = []
-        
+
         for filepath in file_list:
             print(f"  Parsing {os.path.basename(filepath)}...")
             ast, _ = self.parse_single_file(filepath)
             if ast:
                 asts.append(ast)
-        
+
         if not asts:
             raise ValueError("No valid RTL files to parse")
-        
-        # Combine ASTs
+
+        # If only one AST
         if len(asts) == 1:
             return asts[0]
-        
-        # Merge multiple ASTs into first one
+
+        # -------- MERGE ASTs --------
         combined = asts[0]
 
         for ast in asts[1:]:
@@ -82,7 +108,6 @@ class RTLParser:
                 continue
 
             for definition in ast.description.definitions:
-                # Ensure it's a list before appending
                 if isinstance(combined.description.definitions, tuple):
                     combined.description.definitions = list(combined.description.definitions)
 
@@ -91,22 +116,15 @@ class RTLParser:
         return combined
 
 
+# -------- PUBLIC FUNCTION --------
 def parse_rtl(file_list, incremental=True):
     """
     Parses RTL files into AST
-    
-    Args:
-        file_list: List of RTL file paths
-        incremental: If True, parse files incrementally (more scalable)
-    
-    Returns:
-        ast: Combined AST
     """
     if incremental:
         parser = RTLParser()
         return parser.parse_rtl_incremental(file_list)
     else:
-        # Legacy: parse all at once (not recommended for large designs)
         ast, _ = parse(
             file_list,
             preprocess_include=['rtl'],

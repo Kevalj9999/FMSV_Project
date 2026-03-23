@@ -16,6 +16,8 @@ class DependencyVisitor:
 
     # ------------------ VISIT ------------------
     def visit(self, node):
+        if node is None:
+            return
         method_name = 'visit_' + node.__class__.__name__
         visitor = getattr(self, method_name, self.generic_visit)
         return visitor(node)
@@ -26,24 +28,28 @@ class DependencyVisitor:
 
     # ------------------ SAFE ADD ------------------
     def safe_add(self, target, sources):
-        if self.current_module is None:
+        if self.current_module is None or target is None:
             return
+
         if target not in self.graph:
             self.graph[target] = set()
 
         for src in sources:
-            if src != target:  # ❌ remove self-loops
+            if src and src != target:  # avoid self loops
                 self.graph[target].add(src)
 
     # ------------------ ADD DEP ------------------
     def add_dep(self, target, sources):
-        if self.current_module is None:
-            return
         if target is None or self.current_module is None:
             return
 
         target = f"{self.current_module}.{target}"
-        sources = {f"{self.current_module}.{s}" for s in sources}
+
+        sources = {
+            f"{self.current_module}.{s}"
+            for s in sources
+            if s is not None
+        }
 
         self.safe_add(target, sources)
 
@@ -52,13 +58,14 @@ class DependencyVisitor:
         self.current_module = node.name
         self.port_directions = {}
 
-        for item in node.portlist.ports:
-            if isinstance(item, Ioport):
-                name = item.first.name
-                if isinstance(item.first, Input):
-                    self.port_directions[name] = "input"
-                elif isinstance(item.first, Output):
-                    self.port_directions[name] = "output"
+        if node.portlist:
+            for item in node.portlist.ports:
+                if isinstance(item, Ioport):
+                    name = item.first.name
+                    if isinstance(item.first, Input):
+                        self.port_directions[name] = "input"
+                    elif isinstance(item.first, Output):
+                        self.port_directions[name] = "output"
 
         self.generic_visit(node)
 
@@ -80,7 +87,7 @@ class DependencyVisitor:
         self.add_dep(target, rhs.union(conds))
         self.generic_visit(node)
 
-    # ------------------ BLOCKING ------------------
+    # ------------------ BLOCKING (=) ------------------
     def visit_BlockingSubstitution(self, node):
         target = self.get_lhs_name(node.left)
         rhs = self.get_rhs_signals(node.right)
@@ -89,39 +96,37 @@ class DependencyVisitor:
         self.add_dep(target, rhs.union(conds))
         self.generic_visit(node)
 
-    # ------------------ INSTANCE (FIXED 🔥) ------------------
+    # ------------------ INSTANCE ------------------
     def visit_InstanceList(self, node):
-        module_type = node.module  # child module
+        module_type = node.module
 
         for instance in node.instances:
             for port in instance.portlist:
-                port_name = port.portname
                 signal_name = self.get_lhs_name(port.argname)
+                port_name = port.portname
 
-                if signal_name:
-                    parent = f"{self.current_module}.{signal_name}"
-                    child = f"{module_type}.{port_name}"
+                if not signal_name:
+                    continue
 
-                    direction = self.port_directions.get(port_name, "unknown")
+                parent = f"{self.current_module}.{signal_name}"
+                child = f"{module_type}.{port_name}"
 
-                    if direction == "input":
-                        # child depends on parent
-                        self.safe_add(child, {parent})
+                direction = self.port_directions.get(port_name, "unknown")
 
-                    elif direction == "output":
-                        # parent depends on child
-                        if parent not in self.graph:
-                            self.graph[parent] = set()
+                if direction == "input":
+                    self.safe_add(child, {parent})
 
-                        # Only keep first driver (simple fix)
-                        if len(self.graph[parent]) == 0:
-                            self.graph[parent].add(child)
+                elif direction == "output":
+                    if parent not in self.graph:
+                        self.graph[parent] = set()
 
+                    # Keep first driver only
+                    if len(self.graph[parent]) == 0:
+                        self.graph[parent].add(child)
 
     # ------------------ IF ------------------
     def visit_IfStatement(self, node):
         cond_signals = self.get_rhs_signals(node.cond)
-
         self.condition_stack.append(cond_signals)
 
         if node.true_statement:
@@ -151,39 +156,51 @@ class DependencyVisitor:
             self.condition_stack.pop()
 
     # ------------------ HELPERS ------------------
+
     def get_lhs_name(self, node):
-        if isinstance(node, Lvalue):
-            node = node.var
+        from pyverilog.vparser.ast import Identifier, Pointer, Partselect
+
+        if node is None:
+            return None
 
         if isinstance(node, Identifier):
             return node.name
 
-        if isinstance(node, Pointer):
-            return node.var.name
+        elif isinstance(node, Pointer):   # mem[i]
+            return self.get_lhs_name(node.var)
 
-        if isinstance(node, Partselect):
-            return node.var.name
+        elif isinstance(node, Partselect):  # data[7:0]
+            return self.get_lhs_name(node.var)
 
         return None
 
     def get_rhs_signals(self, node):
+        from pyverilog.vparser.ast import Identifier, Pointer, Partselect, IntConst
+
         signals = set()
 
-        if isinstance(node, Identifier):
-            signals.add(node.name)
+        def visit(n):
+            if n is None:
+                return
 
-        elif isinstance(node, Pointer):
-            signals.add(node.var.name)
+            if isinstance(n, Identifier):
+                signals.add(n.name)
 
-        elif isinstance(node, Partselect):
-            signals.add(node.var.name)
+            elif isinstance(n, Pointer):
+                visit(n.var)
+                visit(n.ptr)
 
-        elif isinstance(node, IntConst):
-            return set()  # ✅ ignore constants properly
+            elif isinstance(n, Partselect):
+                visit(n.var)
 
-        for child in node.children():
-            signals.update(self.get_rhs_signals(child))
+            elif isinstance(n, IntConst):
+                return
 
+            else:
+                for c in n.children():
+                    visit(c)
+
+        visit(node)
         return signals
 
 

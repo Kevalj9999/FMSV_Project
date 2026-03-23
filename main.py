@@ -1,4 +1,7 @@
 import os
+import pickle
+from concurrent.futures import ThreadPoolExecutor
+
 from parser.rtl_parser import parse_rtl
 from parser.dependency_extractor import build_dependency_graph
 from parser.target_selector import extract_targets
@@ -73,6 +76,26 @@ def filter_targets(targets):
     return filtered
 
 
+# -------- PARALLEL TARGET PROCESSING --------
+def process_target(args):
+    target, graph, derived_signals = args
+
+    try:
+        result = extract_smart_cone(graph, target)
+
+        cone = result["cone"]
+        paths = result["paths"]
+
+        # Remove derived signals
+        cone = [s for s in cone if s not in derived_signals]
+
+        return target, cone, paths
+
+    except Exception as e:
+        print(f"❌ Error in {target}: {e}")
+        return target, [], []
+
+
 def main():
     rtl_folder = "rtl"
     spec_file = "spec/spec.txt"
@@ -83,18 +106,28 @@ def main():
     print("Parsing RTL files (incremental mode - memory efficient)...")
     ast = parse_rtl(rtl_files, incremental=True)
 
-    print("Building dependency graph...")
-
     rtl_code = load_rtl_code(rtl_files)
     modules = extract_modules(rtl_code)
 
-    # -------- LOCAL GRAPH --------
-    local_graph = build_dependency_graph(ast)
-    local_graph = remove_self_dependencies(local_graph)
+    # -------- GRAPH (WITH CACHE) --------
+    if os.path.exists("graph.pkl"):
+        print("Loading cached graph...")
+        graph = pickle.load(open("graph.pkl", "rb"))
 
-    # -------- GLOBAL GRAPH --------
-    graph = build_global_graph(local_graph, modules)
-    graph = remove_self_dependencies(graph)
+        # ⚠️ Need local_graph for derived signals → rebuild minimal
+        local_graph = build_dependency_graph(ast)
+        local_graph = remove_self_dependencies(local_graph)
+
+    else:
+        print("Building graph from scratch...")
+
+        local_graph = build_dependency_graph(ast)
+        local_graph = remove_self_dependencies(local_graph)
+
+        graph = build_global_graph(local_graph, modules)
+        graph = remove_self_dependencies(graph)
+
+        pickle.dump(graph, open("graph.pkl", "wb"))
 
     # -------- DERIVED SIGNALS --------
     derived_signals = find_derived_signals(local_graph)
@@ -116,35 +149,29 @@ def main():
     for t in targets:
         print(t)
 
-    # -------- CONE EXTRACTION --------
+    # -------- CONE EXTRACTION (PARALLEL) --------
     print("\n--- Register Cones ---\n")
 
     cones = {}
     all_paths = {}
 
-    for target in targets:
-        try:
-            result = extract_smart_cone(graph, target)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = executor.map(
+            process_target,
+            [(t, graph, derived_signals) for t in targets]
+        )
 
-            cone = result["cone"]
-            paths = result["paths"]
+    for target, cone, paths in results:
+        cones[target] = cone
+        all_paths[target] = paths
 
-            # Remove derived signals
-            cone = [s for s in cone if s not in derived_signals]
+        print(f"\nTarget: {target}")
+        print("Cone:", cone)
+        print("Cone size:", len(cone))
 
-            cones[target] = cone
-            all_paths[target] = paths
-
-            print(f"\nTarget: {target}")
-            print("Cone:", cone)
-            print("Cone size:", len(cone))
-
-            print("Paths:")
-            for p in paths[:3]:
-                print(" -> ".join(p))
-
-        except Exception as e:
-            print(f"❌ Error processing target {target}: {e}")
+        print("Paths:")
+        for p in paths[:3]:
+            print(" -> ".join(p))
 
     # -------- CONTEXT EXTRACTION --------
     print("\n--- Context Extraction ---\n")
@@ -169,27 +196,25 @@ def main():
     with open(spec_file, "r") as f:
         spec = f.read()
 
-    # -------- ASSERTION GENERATION (OPTIONAL) --------
-    # Uncomment when ready
-
+    # -------- ASSERTION GENERATION --------
     print("\n--- FINAL ASSERTIONS (PER TARGET) ---\n")
 
     for target in targets:
         context = contexts.get(target, "").strip()
-    
+
         if not context:
             continue
-    
+
         print(f"\n===== TARGET: {target} =====\n")
-    
+
         signals = extract_signals(context)
-    
+
         print("--- Signals ---")
         print(signals)
-    
+
         raw_assertions = generate_assertions(context, spec, signals, target)
         cleaned_assertions = clean_assertions(raw_assertions)
-    
+
         print("\n--- Assertions ---\n")
         print(cleaned_assertions)
 

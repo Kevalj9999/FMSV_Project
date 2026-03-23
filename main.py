@@ -2,7 +2,7 @@ import os
 from parser.rtl_parser import parse_rtl
 from parser.dependency_extractor import build_dependency_graph
 from parser.target_selector import extract_targets
-from parser.cone_extractor import extract_cone
+from parser.cone_extractor import extract_smart_cone
 from parser.context_builder import build_context
 from llm.generator import generate_assertions
 from parser.signal_extractor import extract_signals
@@ -138,7 +138,7 @@ def main():
     cones = {}
 
     for target in targets:
-        cone = extract_cone(graph, target, max_depth=2)
+        cone = extract_smart_cone(graph, target, max_depth=2)
 
         # -------- FIX 3 APPLY --------
         cone = [s for s in cone if s not in derived_signals]

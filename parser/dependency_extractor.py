@@ -1,11 +1,11 @@
 from pyverilog.vparser.ast import *
-import os
 
 
 class DependencyVisitor:
     def __init__(self):
         self.graph = {}
         self.condition_stack = []
+        self.current_module = None
 
     # ------------------ CONDITION STACK ------------------
     def get_current_conditions(self):
@@ -24,15 +24,43 @@ class DependencyVisitor:
         for c in node.children():
             self.visit(c)
 
-    # ------------------ ADD DEP ------------------
-    def add_dep(self, target, sources):
-        if target is None:
+    # ------------------ SAFE ADD ------------------
+    def safe_add(self, target, sources):
+        if self.current_module is None:
             return
-
         if target not in self.graph:
             self.graph[target] = set()
 
-        self.graph[target].update(sources)
+        for src in sources:
+            if src != target:  # ❌ remove self-loops
+                self.graph[target].add(src)
+
+    # ------------------ ADD DEP ------------------
+    def add_dep(self, target, sources):
+        if self.current_module is None:
+            return
+        if target is None or self.current_module is None:
+            return
+
+        target = f"{self.current_module}.{target}"
+        sources = {f"{self.current_module}.{s}" for s in sources}
+
+        self.safe_add(target, sources)
+
+    # ------------------ MODULE ------------------
+    def visit_ModuleDef(self, node):
+        self.current_module = node.name
+        self.port_directions = {}
+
+        for item in node.portlist.ports:
+            if isinstance(item, Ioport):
+                name = item.first.name
+                if isinstance(item.first, Input):
+                    self.port_directions[name] = "input"
+                elif isinstance(item.first, Output):
+                    self.port_directions[name] = "output"
+
+        self.generic_visit(node)
 
     # ------------------ ASSIGN (=) ------------------
     def visit_Assign(self, node):
@@ -52,7 +80,7 @@ class DependencyVisitor:
         self.add_dep(target, rhs.union(conds))
         self.generic_visit(node)
 
-    # ------------------ BLOCKING (= inside always) ------------------
+    # ------------------ BLOCKING ------------------
     def visit_BlockingSubstitution(self, node):
         target = self.get_lhs_name(node.left)
         rhs = self.get_rhs_signals(node.right)
@@ -61,22 +89,47 @@ class DependencyVisitor:
         self.add_dep(target, rhs.union(conds))
         self.generic_visit(node)
 
+    # ------------------ INSTANCE (FIXED 🔥) ------------------
+    def visit_InstanceList(self, node):
+        module_type = node.module  # child module
+
+        for instance in node.instances:
+            for port in instance.portlist:
+                port_name = port.portname
+                signal_name = self.get_lhs_name(port.argname)
+
+                if signal_name:
+                    parent = f"{self.current_module}.{signal_name}"
+                    child = f"{module_type}.{port_name}"
+
+                    direction = self.port_directions.get(port_name, "unknown")
+
+                    if direction == "input":
+                        # child depends on parent
+                        self.safe_add(child, {parent})
+
+                    elif direction == "output":
+                        # parent depends on child
+                        if parent not in self.graph:
+                            self.graph[parent] = set()
+
+                        # Only keep first driver (simple fix)
+                        if len(self.graph[parent]) == 0:
+                            self.graph[parent].add(child)
+
+
     # ------------------ IF ------------------
     def visit_IfStatement(self, node):
         cond_signals = self.get_rhs_signals(node.cond)
 
-        # Push condition
         self.condition_stack.append(cond_signals)
 
-        # True branch
         if node.true_statement:
             self.visit(node.true_statement)
 
-        # False branch
         if node.false_statement:
             self.visit(node.false_statement)
 
-        # Pop condition
         self.condition_stack.pop()
 
     # ------------------ CASE ------------------
@@ -86,19 +139,15 @@ class DependencyVisitor:
         for case_item in node.caselist:
             item_conds = set(case_expr_signals)
 
-            # Add case condition (e.g., GREEN, RED)
             if case_item.cond:
                 for cond in case_item.cond:
                     item_conds.update(self.get_rhs_signals(cond))
 
-            # Push condition
             self.condition_stack.append(item_conds)
 
-            # Visit statements
             if case_item.statement:
                 self.visit(case_item.statement)
 
-            # Pop condition
             self.condition_stack.pop()
 
     # ------------------ HELPERS ------------------
@@ -121,17 +170,16 @@ class DependencyVisitor:
         signals = set()
 
         if isinstance(node, Identifier):
-            # 🔥 Ignore constants (ALL CAPS heuristic)
-            if not node.name.isupper():
-                signals.add(node.name)
+            signals.add(node.name)
 
         elif isinstance(node, Pointer):
-            if not node.var.name.isupper():
-                signals.add(node.var.name)
+            signals.add(node.var.name)
 
         elif isinstance(node, Partselect):
-            if not node.var.name.isupper():
-                signals.add(node.var.name)
+            signals.add(node.var.name)
+
+        elif isinstance(node, IntConst):
+            return set()  # ✅ ignore constants properly
 
         for child in node.children():
             signals.update(self.get_rhs_signals(child))
@@ -144,10 +192,12 @@ class DependencyVisitor:
 class DependencyGraphBuilder:
     def merge_graphs(self, graph1, graph2):
         merged = dict(graph1)
+
         for target, sources in graph2.items():
             if target not in merged:
                 merged[target] = set()
             merged[target].update(sources)
+
         return merged
 
     def build_graph_from_files(self, ast_list):

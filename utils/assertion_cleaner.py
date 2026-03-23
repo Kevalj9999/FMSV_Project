@@ -1,40 +1,33 @@
-def is_valid_assertion(line):
-    if "|->" not in line and "|=>" not in line:
-        return False
+import re
 
-    if not line.strip().startswith("assert property"):
-        return False
+def clean_assertions(text):
+    valid_blocks = []
 
-    return True
+    # ✅ 1. Capture property + assert blocks
+    pattern1 = r'(property[\s\S]*?endproperty\s*assert property\s*\(.*?\);)'
+    matches1 = re.findall(pattern1, text, re.MULTILINE)
 
+    # ✅ 2. Capture inline assertions
+    pattern2 = r'(assert property\s*\(.*?\);)'
+    matches2 = re.findall(pattern2, text, re.MULTILINE)
 
-def clean_assertions(assertions):
-    cleaned = []
-    seen = set()
+    all_blocks = matches1 + matches2
 
-    for line in assertions.split("\n"):
-        l = line.strip()
+    for b in all_blocks:
+        b = b.strip()
 
-        if not l:
+        # Must have temporal operator
+        if "|->" not in b and "|=>" not in b:
             continue
 
-        # ❌ skip invalid format
-        if not is_valid_assertion(l):
+        # ❌ Remove useless always-true logic
+        if "<" in b and "+ 1" in b:
             continue
 
-        # ❌ skip meaningless negation-only assertions
-        if l.endswith("));") and ("|->" not in l and "|=>" not in l):
+        # ❌ Remove weak dependency guesses
+        if "dependency" in b or "throughout" in b:
             continue
 
-        # ❌ skip inequality hallucinations
-        if "!=" in l:
-            continue
+        valid_blocks.append(b)
 
-        # ❌ deduplicate
-        if l in seen:
-            continue
-
-        seen.add(l)
-        cleaned.append(l)
-
-    return "\n".join(cleaned)
+    return "\n\n".join(valid_blocks)

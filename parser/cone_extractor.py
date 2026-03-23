@@ -1,15 +1,20 @@
-def extract_cone(graph, target):
+def extract_cone(graph, target, max_depth=2):
     visited = set()
-    stack = [target]
+    stack = [(target, 0)]
 
     while stack:
-        node = stack.pop()
+        node, depth = stack.pop()
 
-        if node not in visited:
-            visited.add(node)
+        if depth >= max_depth:
+            continue
 
-            for dep in graph.get(node, []):
-                if dep not in visited:
-                    stack.append(dep)
+        for dep in graph.get(node, []):
+            # ❌ Skip derived-like signals early
+            if dep in ("full", "empty"):
+                continue
+
+            if dep not in visited:
+                visited.add(dep)
+                stack.append((dep, depth + 1))
 
     return visited

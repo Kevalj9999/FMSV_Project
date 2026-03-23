@@ -16,20 +16,14 @@ def find_derived_signals(graph):
     derived = set()
 
     for target, deps in graph.items():
-        # remove reset/clk
         filtered = [d for d in deps if d not in ("reset", "clk")]
 
-        # ❗ Skip control-like signals
-        if target in ["wr_en", "rd_en"]:
-            continue
-
-        # ❗ Skip pointer/data signals
-        if any(k in target.lower() for k in ["ptr", "data"]):
-            continue
-
-        # Only single real dependency → derived
         if len(filtered) == 1:
-            derived.add(target)
+            parent = filtered[0]
+
+            # ❗ Check if target is used back in parent
+            if target not in graph.get(parent, []):
+                derived.add(target)
 
     return derived
 

@@ -11,23 +11,19 @@ from parser.module_extractor import extract_modules
 from parser.global_dependency import build_global_graph
 
 
-# -------- FIX 3: Derived signal detection --------
+# -------- DERIVED SIGNAL DETECTION --------
 def find_derived_signals(graph):
     derived = set()
 
     for target, deps in graph.items():
-        # remove reset/clk
         filtered = [d for d in deps if d not in ("reset", "clk")]
 
-        # ❗ Skip control-like signals
         if target in ["wr_en", "rd_en"]:
             continue
 
-        # ❗ Skip pointer/data signals
         if any(k in target.lower() for k in ["ptr", "data"]):
             continue
 
-        # Only single real dependency → derived
         if len(filtered) == 1:
             derived.add(target)
 
@@ -62,28 +58,19 @@ def filter_targets(targets):
     for t in targets:
         t_lower = t.lower()
 
-        # ❌ Skip memory/internal signals
         if "mem" in t_lower or "memory" in t_lower:
             continue
 
-        # ❌ Skip pure control signals
         if t_lower in ["wr_en", "rd_en"]:
             continue
 
-        # ❌ Skip derived flags
         if t_lower in ["full", "empty"]:
             continue
 
-        # ✅ Keep important verification signals
         if any(k in t_lower for k in ["ptr", "count", "data"]):
             filtered.append(t)
 
     return filtered
-
-
-def is_control_target(t):
-    keywords = ["ptr", "count", "state", "ctrl", "flag", "valid", "ready"]
-    return any(k in t.lower() for k in keywords)
 
 
 def main():
@@ -103,17 +90,13 @@ def main():
 
     # -------- LOCAL GRAPH --------
     local_graph = build_dependency_graph(ast)
-
-    # -------- FIX 1 --------
     local_graph = remove_self_dependencies(local_graph)
 
     # -------- GLOBAL GRAPH --------
     graph = build_global_graph(local_graph, modules)
-
-    # -------- CLEAN GLOBAL GRAPH --------
     graph = remove_self_dependencies(graph)
 
-    # -------- FIX 3: DERIVED SIGNALS --------
+    # -------- DERIVED SIGNALS --------
     derived_signals = find_derived_signals(local_graph)
 
     print("\n--- Derived Signals ---\n")
@@ -135,58 +118,81 @@ def main():
 
     # -------- CONE EXTRACTION --------
     print("\n--- Register Cones ---\n")
+
     cones = {}
+    all_paths = {}
 
     for target in targets:
-        cone = extract_smart_cone(graph, target, max_depth=2)
+        try:
+            result = extract_smart_cone(graph, target)
 
-        # -------- FIX 3 APPLY --------
-        cone = [s for s in cone if s not in derived_signals]
+            cone = result["cone"]
+            paths = result["paths"]
 
-        cones[target] = cone
+            # Remove derived signals
+            cone = [s for s in cone if s not in derived_signals]
 
-        print(f"\nTarget: {target}")
-        print("Cone:", list(cone))
-        print("Cone size:", len(cone))
+            cones[target] = cone
+            all_paths[target] = paths
+
+            print(f"\nTarget: {target}")
+            print("Cone:", cone)
+            print("Cone size:", len(cone))
+
+            print("Paths:")
+            for p in paths[:3]:
+                print(" -> ".join(p))
+
+        except Exception as e:
+            print(f"❌ Error processing target {target}: {e}")
 
     # -------- CONTEXT EXTRACTION --------
     print("\n--- Context Extraction ---\n")
+
     contexts = {}
 
     for target in targets:
-        context = build_context(rtl_code, cones[target], target)
-        contexts[target] = context
+        try:
+            cone = cones.get(target, [])
+            paths = all_paths.get(target, [])
 
-        print(f"\nTarget: {target}")
-        print("Context:\n", context)
+            context = build_context(rtl_code, cone, target, paths)
+            contexts[target] = context
+
+            print(f"\nTarget: {target}")
+            print("Context:\n", context)
+
+        except Exception as e:
+            print(f"❌ Context error for {target}: {e}")
 
     # -------- LOAD SPEC --------
     with open(spec_file, "r") as f:
         spec = f.read()
 
-    # (assertion generation still commented)
-    # print("\n--- FINAL ASSERTIONS (PER TARGET) ---\n")
+    # -------- ASSERTION GENERATION (OPTIONAL) --------
+    # Uncomment when ready
 
-    # for target in targets:
-    #     context = contexts.get(target, "").strip()
+    print("\n--- FINAL ASSERTIONS (PER TARGET) ---\n")
 
-    #     if not context:
-    #         continue
+    for target in targets:
+        context = contexts.get(target, "").strip()
+    
+        if not context:
+            continue
+    
+        print(f"\n===== TARGET: {target} =====\n")
+    
+        signals = extract_signals(context)
+    
+        print("--- Signals ---")
+        print(signals)
+    
+        raw_assertions = generate_assertions(context, spec, signals, target)
+        cleaned_assertions = clean_assertions(raw_assertions)
+    
+        print("\n--- Assertions ---\n")
+        print(cleaned_assertions)
 
-    #     print(f"\n===== TARGET: {target} =====\n")
-
-    #     # Extract signals ONLY for this context
-    #     signals = extract_signals(context)
-
-    #     print("--- Signals ---")
-    #     print(signals)
-
-    #     # Generate assertions for this target
-    #     raw_assertions = generate_assertions(context, spec, signals,target)
-    #     cleaned_assertions = clean_assertions(raw_assertions)
-
-    #     print("\n--- Assertions ---\n")
-    #     print(cleaned_assertions)
 
 if __name__ == "__main__":
     main()

@@ -11,26 +11,30 @@ input reset;
         blocks = []
         current = []
         inside = False
-        depth = 0
+        end_count = 0
 
         for line in lines:
             stripped = line.strip()
 
-            if "always" in stripped:
+            if stripped.startswith("always"):
                 inside = True
-                depth = 0
                 current = [line]
+                end_count = 0
                 continue
 
             if inside:
                 current.append(line)
 
+                # Count begins
                 if "begin" in stripped:
-                    depth += 1
-                if "end" in stripped:
-                    depth -= 1
+                    end_count += 1
 
-                if depth <= 0 and stripped == "end":
+                # Count ends
+                if stripped == "end":
+                    end_count -= 1
+
+                # Close only when all begins are matched
+                if end_count <= 0 and stripped == "end":
                     blocks.append("\n".join(current))
                     inside = False
 
@@ -46,8 +50,10 @@ input reset;
     def is_assignment(line):
         return "<=" in line or "=" in line
 
+    short_target = target.split(".")[-1]
+
     def is_target_assignment(line):
-        return f"{target} <=" in line or f"{target} =" in line
+        return f"{short_target} <=" in line or f"{short_target} =" in line
 
     def contains_cone_signal(line):
         return any(sig.split(".")[-1] in line for sig in cone)
@@ -108,7 +114,13 @@ input reset;
     if paths:
         path_text += "\n// ===== Dependency Paths =====\n"
         for i, path in enumerate(paths[:5]):  # limit paths
-            short_path = [p.split(".")[-1] for p in path]
+            short_path = []
+            prev = None
+            for p in path:
+                s = p.split(".")[-1]
+                if s != prev:
+                    short_path.append(s)
+                prev = s
             path_text += f"// Path {i+1}: " + " -> ".join(short_path) + "\n"
 
     # -------- STEP 7: RETURN --------

@@ -11,7 +11,11 @@ from llm.generator import generate_assertions
 from parser.signal_extractor import extract_signals
 from utils.assertion_cleaner import clean_assertions
 from parser.module_extractor import extract_modules
+from parser.signal_mapper import map_graph_to_rtl
 from parser.global_dependency import build_global_graph
+from parser.instance_extractor import extract_instances
+from parser.port_mapper import build_port_map
+from parser.dependency_extractor import merge_with_instances
 
 
 # -------- DERIVED SIGNAL DETECTION --------
@@ -98,78 +102,80 @@ def main():
     rtl_folder = "rtl"
     spec_file = "spec/spec.txt"
 
+    # -------- LOAD RTL FILES --------
     rtl_files = get_rtl_files(rtl_folder)
     print(f"Found {len(rtl_files)} RTL files")
 
-    print("Parsing RTL files (incremental mode - memory efficient)...")
+    print("Parsing RTL files...")
     ast = parse_rtl(rtl_files, incremental=True)
 
     rtl_code = load_rtl_code(rtl_files)
-    modules = extract_modules(rtl_code)
 
-    # -------- GRAPH (WITH CACHE) --------
-    if os.path.exists("graph.pkl"):
-        print("Loading cached graph...")
-        graph = pickle.load(open("graph.pkl", "rb"))
+    # -------- BUILD GRAPH FROM SPEC --------
+    from parser.spec_kg_builder import build_spec_kg, kg_to_graph, clean_graph
 
-        # ⚠️ Need local_graph for derived signals → rebuild minimal
-        local_graph = build_dependency_graph(ast)
-        local_graph = remove_self_dependencies(local_graph)
+    print("\nBuilding Knowledge Graph from Spec...\n")
 
-    else:
-        print("Building graph from scratch...")
+    with open(spec_file, "r") as f:
+        spec_text = f.read()
 
-        local_graph = build_dependency_graph(ast)
-        local_graph = remove_self_dependencies(local_graph)
+    kg = build_spec_kg(spec_text)
 
-        graph = build_global_graph(local_graph, modules)
-        graph = remove_self_dependencies(graph)
+    print("\n--- KG ---\n")
+    print(kg)
 
-        pickle.dump(graph, open("graph.pkl", "wb"))
+    graph = kg_to_graph(kg)
+    graph = clean_graph(graph)
 
-    # -------- DERIVED SIGNALS --------
-    derived_signals = find_derived_signals(local_graph)
+    print("\n--- Graph (Spec-based) ---\n")
+    for k, v in graph.items():
+        print(f"{k} ← {v}")
 
-    print("\n--- Derived Signals ---\n")
-    print(sorted(derived_signals))
+    # -------- TARGETS FROM RTL --------
+    print("\n--- Targets (from RTL) ---\n")
 
-    print("\n--- Dependency Graph (Sample) ---\n")
-    for i, (target, deps) in enumerate(graph.items()):
-        print(f"{target} ← {list(deps)}")
-        if i >= 20:
-            break
-
-    # -------- TARGET EXTRACTION --------
     raw_targets = extract_targets(ast)
     targets = filter_targets(raw_targets)
 
-    print("\n--- Targets ---\n")
     for t in targets:
         print(t)
 
-    # -------- CONE EXTRACTION (PARALLEL) --------
+    # -------- MAP GRAPH TO RTL --------
+    graph = map_graph_to_rtl(graph, targets)
+    instances = extract_instances(ast)
+    graph = merge_with_instances(graph, instances)
+
+    print("\n--- Graph (Mapped to RTL) ---\n")
+    for k, v in graph.items():
+        print(f"{k} ← {v}")
+
+    # -------- DERIVED SIGNALS (EMPTY FOR NOW) --------
+    derived_signals = set()
+
+    # -------- CONE EXTRACTION --------
     print("\n--- Register Cones ---\n")
 
     cones = {}
     all_paths = {}
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = executor.map(
-            process_target,
-            [(t, graph, derived_signals) for t in targets]
-        )
+    for target in targets:
+        try:
+            result = extract_smart_cone(graph, target)
 
-    for target, cone, paths in results:
-        cones[target] = cone
-        all_paths[target] = paths
+            cone = result["cone"]
+            paths = result["paths"]
 
-        print(f"\nTarget: {target}")
-        print("Cone:", cone)
-        print("Cone size:", len(cone))
+            cones[target] = cone
+            all_paths[target] = paths
 
-        print("Paths:")
-        for p in paths[:3]:
-            print(" -> ".join(p))
+            print(f"\nTarget: {target}")
+            print("Cone:", cone)
+            print("Paths:")
+            for p in paths[:3]:
+                print(" -> ".join(p))
+
+        except Exception as e:
+            print(f"❌ Cone error for {target}: {e}")
 
     # -------- CONTEXT EXTRACTION --------
     print("\n--- Context Extraction ---\n")
@@ -190,12 +196,8 @@ def main():
         except Exception as e:
             print(f"❌ Context error for {target}: {e}")
 
-    # -------- LOAD SPEC --------
-    with open(spec_file, "r") as f:
-        spec = f.read()
-
     # -------- ASSERTION GENERATION --------
-    print("\n--- FINAL ASSERTIONS (PER TARGET) ---\n")
+    print("\n--- FINAL ASSERTIONS ---\n")
 
     for target in targets:
         context = contexts.get(target, "").strip()
@@ -207,15 +209,20 @@ def main():
 
         signals = extract_signals(context)
 
-        print("--- Signals ---")
-        print(signals)
+        raw_assertions = generate_assertions(
+            context,
+            graph,
+            all_paths.get(target, []),
+            target
+        )
 
-        raw_assertions = generate_assertions(context, spec, signals, target)
-        cleaned_assertions = clean_assertions(raw_assertions)
+        print("\n--- RawAssertions ---\n")
+        print(raw_assertions)
 
-        print("\n--- Assertions ---\n")
-        print(cleaned_assertions)
+        # cleaned_assertions = clean_assertions(raw_assertions)
 
+        # print("\n--- Cleaned Assertions ---\n")
+        # print(cleaned_assertions)
 
 if __name__ == "__main__":
     main()

@@ -248,3 +248,16 @@ def build_dependency_graph(ast):
         visitor = DependencyVisitor()
         visitor.visit(ast)
         return visitor.graph
+    
+def merge_with_instances(graph, instances):
+    for inst_name, data in instances.items():
+        for port, signal in data["connections"].items():
+
+            child = f"{inst_name}.{port}"
+
+            if signal not in graph:
+                graph[signal] = []
+
+            graph[signal].append(child)
+
+    return graph

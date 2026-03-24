@@ -18,7 +18,7 @@ def extract_cone(graph, target, max_depth=2):
                 stack.append((dep, depth + 1))
 
         # 🔥 IMPORTANT: ranked + limited branching
-        for dep in rank_deps(graph.get(node, []))[:4]:
+        for dep in rank_deps(graph.get(node, []))[:6]:
             if dep not in path:  # avoid cycles per path
                 dfs(dep, path + [dep], depth + 1)
 

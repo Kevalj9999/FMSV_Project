@@ -1,4 +1,11 @@
 def map_graph_to_rtl(graph, rtl_targets):
+    def qualify_signal(target, signal):
+        # target = fifo.count → module = fifo
+        if "." in target:
+            module = target.split(".")[0]
+            return f"{module}.{signal}"
+        return signal
+    
     mapped_graph = {}
 
     # Extract module prefix (assume same module for now)
@@ -23,7 +30,7 @@ def map_graph_to_rtl(graph, rtl_targets):
 
         mapped_deps = []
         for d in deps:
-            mapped_deps.append(map_signal(d))
+            mapped_deps.append(qualify_signal(target, d))
 
         mapped_graph[mapped_target] = mapped_deps
 

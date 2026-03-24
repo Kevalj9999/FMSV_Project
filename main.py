@@ -13,6 +13,9 @@ from utils.assertion_cleaner import clean_assertions
 from parser.module_extractor import extract_modules
 from parser.signal_mapper import map_graph_to_rtl
 from parser.global_dependency import build_global_graph
+from parser.instance_extractor import extract_instances
+from parser.port_mapper import build_port_map
+from parser.dependency_extractor import merge_with_instances
 
 
 # -------- DERIVED SIGNAL DETECTION --------
@@ -141,6 +144,8 @@ def main():
 
     # -------- MAP GRAPH TO RTL --------
     graph = map_graph_to_rtl(graph, targets)
+    instances = extract_instances(ast)
+    graph = merge_with_instances(graph, instances)
 
     print("\n--- Graph (Mapped to RTL) ---\n")
     for k, v in graph.items():
@@ -213,13 +218,13 @@ def main():
             target
         )
 
-        # print("\n--- RawAssertions ---\n")
-        # print(raw_assertions)
+        print("\n--- RawAssertions ---\n")
+        print(raw_assertions)
 
-        cleaned_assertions = clean_assertions(raw_assertions)
+        # cleaned_assertions = clean_assertions(raw_assertions)
 
-        print("\n--- Cleaned Assertions ---\n")
-        print(cleaned_assertions)
+        # print("\n--- Cleaned Assertions ---\n")
+        # print(cleaned_assertions)
 
 if __name__ == "__main__":
     main()

@@ -45,7 +45,7 @@ def extract_smart_cone(graph, target, max_depth=4, max_paths=25):
         paths.append(path.copy())
 
         # 🔥 IMPORTANT: ranked + limited branching
-        for dep in rank_deps(graph.get(node, []))[:4]:
+        for dep in rank_deps(graph.get(node, []))[:6]:
             if dep not in path:  # avoid cycles per path
                 dfs(dep, path + [dep], depth + 1)
 

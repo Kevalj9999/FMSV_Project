@@ -3,82 +3,125 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
 )
 
 
+# -------- FORMAT HELPERS --------
+
 def format_relations(graph, target):
-    rels = []
-
     deps = graph.get(target, [])
-
-    for d in deps:
-        rels.append(f"{d} -> {target}")
-
-    return "\n".join(rels)
+    return "\n".join([f"{d} -> {target}" for d in deps])
 
 
 def format_paths(paths):
     lines = []
-
     for p in paths[:5]:
         lines.append(" -> ".join(p))
-
     return "\n".join(lines)
 
+
+# -------- MAIN GENERATOR --------
 
 def generate_assertions(context, graph, paths, target):
     relations = format_relations(graph, target)
     path_text = format_paths(paths)
 
     prompt = f"""
-You are a formal verification expert.
+You are a hardware formal verification expert.
 
-Generate SystemVerilog assertions for the given target signal.
+Your task is to generate VALID SystemVerilog Assertions (SVA).
 
-STRICT RULES:
-- Output ONLY valid SystemVerilog assertions
-- Use property/assert property syntax
-- No explanation
-- No markdown
-- Use posedge clk
-- Use $past where needed
-- DO NOT generate speculative relationships
-- ONLY generate assertions directly supported by RTL logic
-- Follow SPEC relationships strictly.
-- Use RTL only for signal naming and conditions.
-- Do NOT infer behavior from RTL.
-- The behavior MUST follow the specification-derived dependencies.
-- RTL is only for implementation details like conditions and syntax.
-- If there is conflict, prioritize the specification.
+-----------------------------------
+STRICT RULES (MANDATORY)
+-----------------------------------
 
-TARGET:
+1. Output ONLY valid SystemVerilog (NO explanation)
+2. Use proper syntax:
+   property ... endproperty
+   assert property (...)
+
+3. Use ONLY signals present in context or dependencies
+4. DO NOT invent signals like:
+   - some_condition
+   - enable_signal
+   - expected_value
+
+5. DO NOT chain implications:
+   ❌ a |-> b |-> c
+   ✅ a |-> (b && c)
+
+6. DO NOT assume increment/decrement unless clearly implied
+   (only for count/ptr type signals)
+
+7. Prefer SAFE assertions:
+   - enable conditions
+   - stability (!en -> no change)
+   - valid/ready relationships
+   - dependency checks
+
+8. If unsure → DO NOT generate that assertion
+
+-----------------------------------
+TARGET
+-----------------------------------
 {target}
 
-DEPENDENCIES (from spec knowledge graph):
+-----------------------------------
+DEPENDENCIES (SPEC GRAPH)
+-----------------------------------
 {relations}
 
-DEPENDENCY PATHS:
+-----------------------------------
+DEPENDENCY PATHS
+-----------------------------------
 {path_text}
 
-RTL CONTEXT:
+-----------------------------------
+RTL CONTEXT
+-----------------------------------
 {context}
 
-Generate assertions that:
-- Capture increment/decrement behavior
-- Capture enable conditions
-- Capture dependencies between signals
+-----------------------------------
+OUTPUT REQUIREMENTS
+-----------------------------------
+
+Generate 3 to 5 HIGH-QUALITY assertions.
+
+Each assertion must:
+- Be logically correct
+- Be synthesizable SVA style
+- Use @(posedge clk) disable iff (reset)
+
+Focus on:
+- enable → behavior
+- dependency → implication
+- no-change conditions
+
+DO NOT generate weak or generic assertions.
 """
 
-    response = client.chat.completions.create(
-        model="openai/gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
+    try:
+        response = client.chat.completions.create(
+            model="openai/gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=800
+        )
 
+        output = response.choices[0].message.content
 
-    output = response.choices[0].message.content
+        # -------- BASIC SANITY CLEAN --------
+        if not output or len(output.strip()) < 10:
+            return ""
+        if "some_" in output or "enable_condition" in output:
+            return ""
 
-    return output
+        return output.strip()
+
+    except Exception as e:
+        print(f"❌ LLM Error for {target}: {e}")
+        return ""

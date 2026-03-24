@@ -29,9 +29,8 @@ def rank_deps(deps):
     return sorted(deps, key=score, reverse=True)
 
 
-def extract_smart_cone(graph, target, max_depth=4, max_paths=25):
+def extract_smart_cone(graph, target, max_depth=5, max_paths=50):
     paths = []
-    visited = set()
 
     def dfs(node, path, depth):
         # Stop conditions
@@ -41,11 +40,23 @@ def extract_smart_cone(graph, target, max_depth=4, max_paths=25):
         if len(paths) >= max_paths:
             return
 
-        visited.add(node)
+        # # 🔍 DEBUG START
+        # if node not in graph:
+        #     print(f"[WARNING] Node not in graph: {node}")
+
+        deps = graph.get(node, [])
+
+        # print(f"\n[DEBUG] Visiting: {node}")
+        # print(f"[DEBUG] Dependencies: {deps}")
+        # print(f"[DEBUG] Path: {path}")
+        # 🔍 DEBUG END
+
         paths.append(path.copy())
 
-        # 🔥 IMPORTANT: ranked + limited branching
-        for dep in rank_deps(graph.get(node, []))[:6]:
+        # 🔥 Ranked + limited branching
+        ranked = rank_deps(deps)
+
+        for dep in ranked[:4]:
             if dep not in path:  # avoid cycles per path
                 dfs(dep, path + [dep], depth + 1)
 
@@ -63,7 +74,7 @@ def extract_smart_cone(graph, target, max_depth=4, max_paths=25):
         if '.' in s and not s.endswith(("clk", "reset"))
     }
 
-    # -------- Sort cone (important for consistency) --------
+    # -------- Sort cone --------
     cone = sorted(cone, key=lambda x: -score_signal(x))
 
     return {

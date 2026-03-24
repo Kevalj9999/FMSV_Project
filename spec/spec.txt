@@ -1,29 +1,598 @@
-FIFO System Specification:
-
-1. On reset:
-   - wr_ptr = 0
-   - rd_ptr = 0
-   - count = 0
-   - full = 0
-   - empty = 1
-
-2. Write operation:
-   - If wr_en == 1 and full == 0:
-       wr_ptr increments
-       count increments
-
-3. Read operation:
-   - If rd_en == 1 and empty == 0:
-       rd_ptr increments
-       data_out gets mem[rd_ptr]
-       count decrements
-
-4. Full condition:
-   - full == 1 when count == 15
-
-5. Empty condition:
-   - empty == 1 when count == 0
-
-6. Controller:
-   - wr_en is 1 when not full
-   - rd_en is 1 when not empty
+Signals:
+- clk
+- rst
+- per_we
+- per_addr
+- per_data
+- irq
+- debug_data
+- debug_clk
+Behavior:
+- The openMSP430 core operates as a 16-bit microcontroller, executing instructions compatible with the MSP430 family. It supports interrupts, low power modes, and features a DMA interface. The serial debug interface allows for in-system debugging with GDB support. The core is configurable for memory size and peripheral address space and can be implemented in both FPGA and ASIC technologies.
+Dependencies:
+- clk depends on power supply
+- rst depends on initialization circuitry
+- per_we depends on control signals
+- per_addr depends on memory mapping
+- per_data depends on data bus
+- irq depends on configured interrupts
+- debug_data depends on serial debug interface signals
+- debug_clk depends on the debug interface timing requirements
+```
+- MCLK
+- ACLK
+- SMCLK
+- NMI
+- Watchdog
+- PUC
+- CPU_ID.USER_VERSION
+- IRQ
+- dbg_en
+- SYNC_NMI
+- SYNC_CPU_EN
+- SYNC_DBG_EN
+- The openMSP430 microcontroller core fetches and decodes instructions via the frontend and executes them in the execution unit. It supports debugging through a serial interface and manages memory accesses through the memory backbone. The Basic Clock Module generates clock signals and manages low power modes.
+- MCLK depends on Basic Clock Module
+- ACLK depends on Basic Clock Module
+- SMCLK depends on Basic Clock Module
+- NMI depends on Watchdog
+- Watchdog depends on NMI interrupts
+- PUC depends on Watchdog
+- CPU_ID.USER_VERSION depends on user defined version settings
+- IRQ depends on the number of available IRQs
+- dbg_en depends on SYNC_DBG_EN
+- SYNC_NMI depends on input synchronizers
+- SYNC_CPU_EN depends on input synchronizers
+- SYNC_DBG_EN depends on input synchronizers
+- PER_SIZE_CUSTOM
+- PER_SIZE_32_KB
+- PER_SIZE_16_KB
+- PER_SIZE_8_KB
+- PER_SIZE_4_KB
+- PER_SIZE_2_KB
+- PER_SIZE_1_KB
+- PER_SIZE_512_B
+- DBG_RST_BRK_EN
+- DBG_UART
+- DBG_I2C
+- DBG_I2C_BROADCAST
+- DBG_HWBRK_0
+- DBG_HWBRK_1
+- DBG_HWBRK_2
+- DBG_HWBRK_3
+- DBG_HWBRK_RANGE
+- PMEM_CUSTOM_AWIDTH
+- PMEM_CUSTOM_SIZE
+- DMEM_CUSTOM_AWIDTH
+- DMEM_CUSTOM_SIZE
+- PER_CUSTOM_AWIDTH
+- PER_CUSTOM_SIZE
+- ASIC
+- The system supports custom peripheral memory size configuration, ranging from 512B to 32kB, which shifts data memory mapping and requires a custom linker script.
+- The CPU will automatically break after a power-up clear (PUC) occurrence when `DBG_RST_BRK_EN` is defined, which is useful for debugging during memory initialization through a serial debug interface.
+- The selected serial debug interface can operate over UART or I2C.
+- For multicore systems, the I2C broadcast address can be enabled for synchronized control across cores.
+- Hardware breakpoint options allow inclusion of up to four units, with features for range mode to trigger breakpoints based on address ranges.
+- Peripheral memory size depends on PER_SIZE_CUSTOM.
+- Debug control signals depend on DBG_RST_BRK_EN.
+- I2C broadcast address depends on DBG_I2C.
+- Hardware breakpoints depend on direct definitions from DBG_HWBRK_0 to DBG_HWBRK_3.
+- Custom program and data memory sizes depend on PMEM_CUSTOM_SIZE and DMEM_CUSTOM_SIZE.
+**Signals:**
+- cpu_en
+- dco_clk
+- lfxt_clk
+- mclk
+- aclk_en
+- smclk_en
+- dco_enable
+- dco_wkup
+- lfxt_enable
+- lfxt_wkup
+- aclk
+- smclk
+- wkup
+- puc_rst
+- reset_n
+- nmi
+- irq_acc
+- pmem_addr
+- pmem_cen
+- pmem_din
+- pmem_dout
+- pmem_wen
+- dmem_addr
+- dmem_cen
+- dmem_din
+- dmem_dout
+- dmem_wen
+- per_din
+- per_dout
+- per_en
+- dma_addr
+- dma_din
+- dma_dout
+- dma_en
+- dma_priority
+- dma_ready
+- dma_resp
+- dma_we
+- dma_wkup
+- dbg_freeze
+- dbg_uart_txd
+- dbg_uart_rxd
+- dbg_i2c_addr
+- dbg_i2c_broadcast
+- dbg_i2c_scl
+- dbg_i2c_sda_in
+- dbg_i2c_sda_out
+- scan_enable
+- scan_mode
+**Behavior:**
+- cpu_en: Enables CPU code execution (asynchronous and non-glitchy). Set to 1 if unused.
+- dco_clk: Fast oscillator (fast clock).
+- lfxt_clk: Low-frequency oscillator (typically 32kHz), set to 0 if unused.
+- mclk: Main system clock.
+- aclk_en: ACLK enable (FPGA ONLY).
+- smclk_en: SMCLK enable (FPGA ONLY).
+- dco_enable: Fast oscillator enable (ASIC ONLY).
+- dco_wkup: Fast oscillator wakeup (asynchronous) (ASIC ONLY).
+- lfxt_enable: Low-frequency oscillator enable (ASIC ONLY).
+- lfxt_wkup: Low-frequency oscillator wakeup (asynchronous) (ASIC ONLY).
+- aclk: ACLK (ASIC ONLY).
+- smclk: SMCLK (ASIC ONLY).
+- wkup: System wake-up (asynchronous and non-glitchy) (ASIC ONLY). Set to 0 if unused.
+- puc_rst: Main system reset.
+- reset_n: Reset pin (active low, asynchronous and non-glitchy).
+- irq: Maskable interrupts (one-hot signal).
+- nmi: Non-maskable interrupt (asynchronous and non-glitchy). Set to 0 if unused.
+- irq_acc: Interrupt request accepted (one-hot signal).
+- pmem_addr: Program Memory address.
+- pmem_cen: Program Memory chip enable (low active).
+- pmem_din: Program Memory data input (optional).
+- pmem_dout: Program Memory data output.
+- pmem_wen: Program Memory write byte enable (low active) (optional).
+- dmem_addr: Data Memory address.
+- dmem_cen: Data Memory chip enable (low active).
+- dmem_din: Data Memory data input.
+- dmem_dout: Data Memory data output.
+- dmem_wen: Data Memory write byte enable (low active).
+- per_addr: Peripheral address.
+- per_din: Peripheral data input.
+- per_dout: Peripheral data output.
+- per_en: Peripheral enable (high active).
+- per_we: Peripheral write enable (high active).
+- dma_addr: Direct Memory Access address.
+- dma_din: Direct Memory Access data input.
+- dma_dout: Direct Memory Access data output.
+- dma_en: Direct Memory Access enable (high active).
+- dma_priority: Direct Memory Access priority (0: low / 1: high).
+- dma_ready: Direct Memory Access is complete.
+- dma_resp: Direct Memory Access response (0: Okay / 1: Error).
+- dma_we: Direct Memory Access write byte enable (high active).
+- dma_wkup: DMA Wake-up (asynchronous and non-glitchy) (ASIC ONLY).
+- dbg_en: Debug interface enable (asynchronous).
+- dbg_freeze: Freeze peripherals.
+- dbg_uart_txd: Debug interface: UART TXD.
+- dbg_uart_rxd: Debug interface: UART RXD (asynchronous).
+- dbg_i2c_addr: Debug interface: I2C Address.
+- dbg_i2c_broadcast: Debug interface: I2C Broadcast Address (for multicore systems).
+- dbg_i2c_scl: Debug interface: I2C SCL (asynchronous).
+- dbg_i2c_sda_in: Debug interface: I2C SDA IN (asynchronous).
+- dbg_i2c_sda_out: Debug interface: I2C SDA OUT.
+- scan_enable: Scan enable (active during scan shifting) (ASIC ONLY).
+- scan_mode: Scan mode (ASIC ONLY).
+**Dependencies:**
+- cpu_en depends on mclk.
+- aclk_en depends on mclk.
+- smclk_en depends on mclk.
+- dco_enable depends on dco_clk.
+- lfxt_enable depends on lfxt_clk.
+- puc_rst depends on mclk.
+- reset_n depends on <async>.
+- irq depends on mclk.
+- nmi depends on <async> or mclk4.
+- pmem_addr depends on mclk.
+- pmem_cen depends on mclk.
+- pmem_din depends on mclk.
+- pmem_dout depends on mclk.
+- pmem_wen depends on mclk.
+- dmem_addr depends on mclk.
+- dmem_cen depends on mclk.
+- dmem_din depends on mclk.
+- dmem_dout depends on mclk.
+- dmem_wen depends on mclk.
+- per_addr depends on mclk.
+- per_din depends on mclk.
+- per_dout depends on mclk.
+- per_en depends on mclk.
+- per_we depends on mclk.
+- dma_addr depends on mclk.
+- dma_din depends on mclk.
+- dma_dout depends on mclk.
+- dma_en depends on mclk.
+- dma_priority depends on mclk.
+- dma_ready depends on mclk.
+- dma_resp depends on mclk.
+- dma_we depends on mclk.
+- dbg_en depends on <async> or mclk4.
+- dbg_freeze depends on mclk.
+- dbg_uart_txd depends on mclk.
+- dbg_uart_rxd depends on <async>.
+- dbg_i2c_addr depends on mclk.
+- dbg_i2c_broadcast depends on mclk.
+- dbg_i2c_scl depends on <async>.
+- dbg_i2c_sda_in depends on <async>.
+- scan_enable depends on dco_clk.
+- scan_mode depends on <stable>.
+- irq_port1
+- irq_port2
+- p1_din
+- p1_dout
+- p1_dout_en
+- p1_sel
+- p2_din
+- p2_dout
+- p2_dout_en
+- p2_sel
+- p3_din
+- p3_dout
+- p3_dout_en
+- p3_sel
+- p4_din
+- p4_dout
+- p4_dout_en
+- p4_sel
+- p5_din
+- p5_dout
+- p5_dout_en
+- p5_sel
+- p6_din
+- p6_dout
+- p6_dout_en
+- p6_sel
+- The Basic Clock Module provides clocking for the CPU and peripherals without using clock gates or muxes, with the ability to enter an IDLE state without stopping MCLK. The registers are utilized to control clock division and selection for ACLK, SMCLK, and MCLK. The Watchdog Timer and Hardware Multiplier functionalities are optional and can be included or excluded based on configuration.
+- ACLK_EN depends on BCSCTL1.DIVAx
+- SMCLK_EN depends on BCSCTL2.SELS
+- MCLK depends on BCSCTL2.SELMx
+- Port 1 and Port 2 interrupts depend on their respective GPIO settings
+- Peripheral operations depend on per_en and per_we signals
+- p6_din: Input, 8-bit, Port 6 data input
+- p6_dout: Output, 8-bit, Port 6 data output
+- p6_dout_en: Output, 8-bit, Port 6 data output enable
+- p6_sel: Output, 8-bit, Port 6 function select
+- mclk: Input, 1-bit, Main system clock
+- aclk_en: Input, 1-bit, ACLK enable (from CPU)
+- smclk_en: Input, 1-bit, SMCLK enable (from CPU)
+- inclk: Input, 1-bit, INCLK external timer clock
+- taclk: Input, 1-bit, TACLK external timer clock
+- puc_rst: Input, 1-bit, Main system reset
+- dbg_freeze: Input, 1-bit, Freeze Timer A counter
+- irq_ta0: Output, 1-bit, Timer A interrupt: TACCR0
+- irq_ta1: Output, 1-bit, Timer A interrupt: TAIV, TACCR1, TACCR2
+- irq_ta0_acc: Input, 1-bit, Interrupt request TACCR0 accepted
+- per_addr: Input, 8-bit, Peripheral address
+- per_din: Input, 16-bit, Peripheral data input
+- per_dout: Output, 16-bit, Peripheral data output
+- per_en: Input, 1-bit, Peripheral enable
+- per_we: Input, 2-bit, Peripheral write enable
+- ta_cci0a: Input, 1-bit, Timer A capture 0 input A
+- ta_cci0b: Input, 1-bit, Timer A capture 0 input B
+- ta_out0: Output, 1-bit, Timer A output 0
+- ta_out0_en: Output, 1-bit, Timer A output 0 enable
+- ta_cci1a: Input, 1-bit, Timer A capture 1 input A
+- ta_cci1b: Input, 1-bit, Timer A capture 1 input B
+- ta_out1: Output, 1-bit, Timer A output 1
+- ta_out1_en: Output, 1-bit, Timer A output 1 enable
+- ta_cci2a: Input, 1-bit, Timer A capture 2 input A
+- ta_cci2b: Input, 1-bit, Timer A capture 2 input B
+- ta_out2: Output, 1-bit, Timer A output 2
+- ta_out2_en: Output, 1-bit, Timer A output 2 enable
+- DMA_WKUP: Input, 1-bit, Wakeup signal
+- DMA_ADDR[15:1]: Input, 15-bit, Address bus
+- DMA_DIN[15:0]: Input, 16-bit, Write data bus
+- DMA_DOUT[15:0]: Output, 16-bit, Read data bus
+- DMA_EN: Input, 1-bit, Transfer enable
+- DMA_WE[1:0]: Input, 2-bit, Transfer direction
+- DMA_PRIORITY: Input, 1-bit, Transfer priority
+- DMA_READY: Output, 1-bit, Transfer done
+- DMA_RESP: Output, 1-bit, Transfer response
+- Timer A provides various timing and counting functionalities and interrupts based on the configured capture/compare settings.
+- The DMA interface allows direct memory access and transfers data between the DMA master and the openMSP430 system, managing data movement without CPU intervention.
+- p6_dout depends on p6_dout_en
+- mclk depends on inclk and taclk
+- irqs depend on Timer A configurations
+- DMA_RESP depends on DMA_EN and DMA_READY
+- DMA_PRIORITY
+- DMA_WKUP
+- MCLK_CPU
+- MCLK_DMA
+- Transfers to address A return an ERROR response when nothing is mapped in the address range.
+- Transfers to address B result in an OKAY response without wait states.
+- When DMA_PRIORITY is CLEARED, DMA transfers have lower priority than the CPU.
+- When DMA_PRIORITY is SET, DMA transfers have higher priority than the CPU and complete in a single clock cycle.
+- The DMA master can dynamically change DMA_PRIORITY for varying data-rate requirements.
+- The bootloader initializes program memory in HIGH-PRIORITY mode and generates a reset pulse after initialization.
+- DMA_PRIORITY controls the priority of DMA transfers relative to CPU execution.
+- MCLK_DMA is restored by asserting the DMA_WKUP pin during low power modes.
+- CPU_ID_LO
+- CPU_ID_HI
+- CPU_CTL
+- CPU_STAT
+- MEM_CTL
+- MEM_ADDR
+- MEM_DATA
+- The debug unit allows access to the CPU control/status and memory access registers through a designated communication interface. Each register serves specific functions such as controlling CPU operations (CPU_CTL), monitoring CPU status (CPU_STAT), and facilitating read/write operations (MEM_CTL, MEM_ADDR, MEM_DATA).
+- CPU_STAT depends on CPU_CTL
+- MEM_DATA depends on MEM_ADDR and MEM_CTL
+- MEM_CNT
+- BRKx_CTL
+- BRKx_STAT
+- BRKx_ADDR0
+- BRKx_ADDR1
+- MEM_DATA: Contains data to be written during the next write transfer when MEM_CTL.WR is active, or updated with data from the read transfer when MEM_CTL.RD is active.
+- MEM_CNT: Controls burst access to memory or CPU registers. A value of 0 indicates a single access; a non-zero value specifies the burst size for the next transfer, which decrements as the burst progresses.
+- BRKx_CTL: Controls the hardware breakpoint unit x, including range mode, instruction enable, breakpoint enable, and access mode.
+- BRKx_STAT: Provides status of the hardware breakpoint unit x, indicating various access types like read/write within specified ranges or addresses.
+- BRKx_ADDR0: Holds the comparison value against the current address on the program or data address bus.
+- BRKx_ADDR1: Also holds a comparison value against the current address on the program or data address bus.
+- MEM_DATA depends on MEM_CTL.WR and MEM_CTL.RD
+- MEM_CNT depends on its own value to determine access type
+- BRKx_CTL depends on RANGE_MODE, INST_EN, BREAK_EN, and ACCESS_MODE
+- BRKx_STAT depends on the operation performed (read/write) and the state of BRKx_CTL
+- BRKx_ADDR0 depends on the current address on the program or data address bus
+- BRKx_ADDR1 depends on the current address on the program or data address bus
+- The I2C interface allows communication with a host computer through the dbg_i2c_scl and dbg_i2c_sda ports.
+- It supports read and write access to debug registers through command frames sent by the host.
+- I2C transactions can include single or multiple data frames based on the command frame.
+- Burst access for read/write operations is initiated by setting the MEM_CTL.START bit.
+- dbg_i2c_scl depends on I2C communication
+- dbg_i2c_sda_in depends on I2C input data
+- dbg_i2c_sda_out depends on I2C output data
+- cpu_en depends on mclk
+- puc_rst depends on mclk
+- dma_en depends on mclk
+- irq_acc depends on mclk
+- dbg_en depends on mclk
+- dco_enable depends on dco_clk
+- lfxt_enable depends on lfxt_clk
+- wkup depends on asynchronous reset
+- per_en depends on mclk
+- pmem_cen depends on mclk
+- dmem_cen depends on mclk
+- CPU_EN
+- DCO_CLK
+- LFXT_CLK
+- ACLK_EN
+- SMCLK_EN
+- DCO_ENABLE
+- DCO_WKUP
+- LFXT_ENABLE
+- LFXT_WKUP
+- WKUP
+- RESET_N
+- PUC_RST
+- PMEM_CEN
+- PMEM_ADDR
+- PMEM_DOUT
+- PMEM_WEN
+- PMEM_DIN
+- DMEM_CEN
+- DMEM_ADDR
+- DMEM_DOUT
+- DMEM_WEN
+- DMEM_DIN
+- PER_EN
+- PER_ADDR
+- PER_DOUT
+- PER_WE
+- PER_DIN
+- CPU_EN controls the start or stop of CPU execution.
+- DCO_CLK serves as the primary clock signal for the system.
+- LFXT_CLK is used for low-frequency clock requirements when ACLK_EN or SMCLK_EN are active.
+- MCLK acts as the main system clock for the openMSP430.
+- ACLK_EN and SMCLK_EN are used to emulate original ACLK and SMCLK functionality.
+- DCO_ENABLE and DCO_WKUP control the operation of the fast clock generator for low power modes.
+- LFXT_ENABLE and LFXT_WKUP manage the low-frequency clock generator for low power modes.
+- WKUP allows peripherals to wake up the CPU.
+- RESET_N initiates a system reset.
+- PUC_RST asynchronously resets the system and is synchronized with MCLK for clean timing.
+- PMEM_CEN triggers memory access on the next MCLK rising edge.
+- PMEM_ADDR indicates which memory location is accessed.
+- PMEM_DOUT provides the output from the memory during access.
+- PMEM_WEN indicates which bytes to write during a memory access.
+- PMEM_DIN carries the data to be written to memory.
+- DMEM_CEN and DMEM_ADDR function similarly for data memory as PMEM signals do for program memory.
+- PER_EN enables read/write access to peripherals.
+- PER_ADDR defines the addressed peripheral register.
+- PER_DOUT returns the output from the peripheral access.
+- PER_WE selects which bytes to write for peripherals.
+- PER_DIN carries the data to be written to peripherals.
+- CPU_EN depends on a hardware mechanism for stopping/resuming the CPU.
+- ACLK_EN depends on LFXT_CLK frequency constraints.
+- SMCLK_EN depends on DCO_CLK frequency conditions.
+- RESET_N depends on the board push button and power-on-reset.
+- PUC_RST depends on RESET_N, the watchdog reset, or the serial debug interface reset.
+- PMEM_CEN depends on the next MCLK rising edge for memory access execution.
+- DMEM_CEN depends on the next MCLK for data memory access execution.
+- PER_EN depends on the current MCLK cycle for executing read access.
+- DMA_EN
+- DMA_ADDR
+- DMA_DOUT
+- DMA_WE
+- DMA_DIN
+- DMA_READY
+- DMA_RESP
+- IRQ_ACC
+- DBG_EN
+- DBG_FREEZE
+- DBG_UART_TXD
+- DBG_UART_RXD
+- DBG_I2C_ADDR
+- DBG_I2C_SCL
+- DBG_I2C_SDA_OUT
+- DBG_I2C_SDA_IN
+- DMA_EN enables a DMA transfer until the transfer is completed, as indicated by DMA_READY.
+- DMA_ADDR holds the logical address of the 16-bit word being accessed and must remain valid during the transfer.
+- DMA_DOUT is valid during the MCLK cycle after the DMA transfer ends.
+- DMA_WE indicates which byte is being written during a transfer; it can activate write on either the lower or upper byte.
+- DMA_DIN must stay valid until the transfer is completed, as signaled by DMA_READY.
+- DMA_PRIORITY, when set, prioritizes the DMA transfer above the CPU execution.
+- DMA_READY indicates that the current DMA transfer is complete.
+- DMA_RESP indicates if the transfer was successful (0) or if an error occurred (1) and is valid with DMA_READY.
+- DMA_WKUP restores clocks before a DMA transfer in low-power modes.
+- NMI is a non-maskable interrupt that is masked by NMIIE and synchronized to the MCLK domain.
+- IRQ signals can be connected to MCLK domain sources, with priorities defined by their order.
+- DBG_EN enables or disables the serial debug interface, held in reset when disabled.
+- DBG_FREEZE freezes peripherals when the CPU is stopped for debugging.
+- DBG_UART_TXD and DBG_UART_RXD facilitate communication via an RS-232 transceiver.
+- DBG_I2C_ADDR and DBG_I2C_BROADCAST set the I2C Device address and broadcast address for the core.
+- DBG_I2C_SCL is the clock input for the I2C bus.
+- DBG_I2C_SDA_OUT and DBG_I2C_SDA_IN are used for the I2C data line signals.
+- DMA_READY depends on DMA_EN.
+- DMA_DOUT depends on DMA_READY.
+- DMA_DIN depends on DMA_READY.
+- DMA_PRIORITY influences the execution of the CPU and DMA transfers.
+- DBG_FREEZE depends on DBG_EN and the state of the CPU.
+- NMI depends on the NMIIE mask.
+- IRQ_ACC depends on the servicing of interrupts.
+- CPUOFF
+- SCG1
+- The ACLK, MCLK, and SMCLK clock domains can be configured to operate with DCO_CLK or LFXT_CLK based on the defined configurations.
+- When specific options are enabled, the clock dividers for MCLK, SMCLK, and ACLK can reduce the clock frequency by factors of (1, 2, 4, 8).
+- The CPUOFF and SCG1 flags control the power modes, allowing MCLK and SMCLK to be switched off in low power modes.
+- MCLK depends on DCO_CLK or LFXT_CLK based on MCLK_MUX configuration
+- SMCLK depends on DCO_CLK or LFXT_CLK based on SMCLK_MUX configuration
+- ACLK depends on DCO_CLK, MCLK_MUX and SMCLK_MUX configurations
+- MCLK depends on CPUOFF_EN in low power modes
+- SMCLK depends on SCG1_EN in low power modes
+- SCG0
+- OSCOFF
+- GIE
+- WATCHDOG_MUX
+- WATCHDOG_NOMUX_ACLK
+- SCG0 and OSCOFF control the disabling of the DCO and LFXT oscillators respectively.
+- When inactive, the *_WKUP signal is used to wake up the oscillator asynchronously.
+- The DCO oscillator remains enabled until SCG0 or OSCOFF is cleared by the CPU.
+- To wake up from any low power mode, the system must respond to the WKUP input, enabling clocks in a specific sequence.
+- The watchdog clock mux allows for either ACLK or SMCLK selection; if the mux is disabled, it defaults to ACLK or SMCLK based on the WATCHDOG_NOMUX_ACLK option.
+- DCO_WKUP depends on WKUP
+- DCO_ENABLE depends on the availability of MCLK
+- DCO oscillator depends on SCG0
+- LFXT oscillator depends on OSCOFF
+- clock gates depend on scan_enable during shift phase
+- functional behavior during capture phase depends on clearing scan_enable
+- clock mux behavior depends on scan_mode being set
+- WKUP_OUT
+- WKUP_EVENT
+- WKUP_CLEAR
+- enable
+- The AND gate ensures glitch-free generation of wake-up signals on the wake-up paths.
+- The clock gate can park the clock high or low without affecting functionality, and enables signals are generated with the rising edge of the clock.
+- Clock mux implementation should maintain integrity with NAND2 and AND2 cells to avoid synthesis issues.
+- The scan mux controls all internal resets during scan mode through the reset_n input.
+- The synchronization cell is used for clock domain crossings, ensuring safe data transfer.
+- The wakeup cell triggers the WKUP_OUT signal on the rising edge of WKUP_EVENT and clears it with WKUP_CLEAR.
+- WKUP_OUT depends on WKUP_EVENT and WKUP_CLEAR.
+- The enable signal in clock gates depends on the rising edge of the clock.
+- The scan mux depends on the reset_n signal.
+- device
+- adaptor
+- speed
+- i2c_addr
+- The openmsp430-loader loads the openMSP430 program memory with an executable file (ELF or Intel-HEX format).
+- The openmsp430-minidebug connects to the openMSP430 Serial Debug Interface and allows loading program memory, controlling the CPU, accessing registers, and viewing disassembled code.
+- The openmsp430-gdbproxy bridges the GDB communication protocol to the openMSP430 serial debug interface.
+- device depends on communication port
+- adaptor depends on adaptor type
+- speed depends on communication speed
+- i2c_addr depends on cpu address
+- msp430x247
+- msp430x2471
+- msp430x1610
+- msp430x5438
+- msp430x5437
+- msp430x5436
+- msp430x5435
+- msp430x5419
+- msp430x54
+- msp430x1611
+- msp430x248
+- msp430x2481
+- msp430x4783
+- msp430xG438
+- msp430x4784
+- msp430x148
+- msp430x168
+- msp430x1481
+- msp430x448
+- msp430xG4617
+- msp430x2418
+- msp430x2618
+- msp430x2417
+- msp430xG4618
+- msp430x2617
+- msp430x1612
+- msp430x2619
+- msp430xG4619
+- msp430xG4616
+- msp430x2416
+- msp430x2419
+- msp430x2616
+- msp430x2410
+- msp430x4794
+- msp430x4793
+- msp430x2491
+- msp430x1491
+- msp430x149
+- msp430xG439
+- msp430x249
+- msp430x449
+- msp430x169
+- The program memory size must match the openMSP430 configuration.
+- A customized linker script must be provided if the peripheral address space is larger than the standard 512B.
+- The program memory size is dependent on the openMSP430 configuration.
+- A custom linker script depends on the configurations of PROGRAM MEMORY and PERIPHERAL SPACE.
+- clock_module
+- lp_modes
+- dma
+- dbg
+- sfr
+- gpio
+- template_periph
+- wdt
+- tA
+- mpy
+- scan
+- openMSP430_fpga
+- driver_7segment
+- io_mux
+- ext_de1_sram
+- ram16x512
+- rom16x2048
+- The system operates in multiple CPU and low power modes indicated by CPUOFF, OSCOFF, and SCG1 signals.
+- The clock module provides timing control for various operations in the design.
+- DMA and Debug interfaces manage data transfer and debugging, respectively.
+- The system supports various peripheral templates, watchdog timers, timers, and multipliers for processing tasks.
+- The Seven-Segment LED display driver facilitates visual output management.
+- The I/O multiplexer selects functions for different ports, influencing peripheral interactions.
+- Clock behavior depends on clock_module.
+- Low Power modes (lp_modes) depend on CPU operational modes.
+- DMA operations (dma) depend on the status of the clock_module.
+- Debug functionality (dbg) depends on core signals from the openMSP430_fpga.
+- The Seven-Segment Display driver (driver_7segment) depends on output from the io_mux.
+- RAM and ROM interfaces are dependent on the interactions defined by ext_de1_sram and memory operations.
+- LED
+- UART
+- SPI
+- DATA_MEMORY
+- PROGRAM_MEMORY
+- The application controls the blinking of LEDs based on timing parameters.
+- The system interacts with the UART for serial debugging.
+- Data processing occurs through SPI communication with the DAC121S101.
+- RAM modules are used for data (128 Bytes) and program (2 kBytes) memory.
+- LED depends on timing parameters.
+- UART depends on the UART task module.
+- SPI depends on the DAC121S101 interface.
+- DATA_MEMORY depends on data access instructions.
+- PROGRAM_MEMORY depends on program access instructions.

@@ -1,33 +1,39 @@
 import re
 
+def is_valid_assertion(block):
+    block = block.strip()
+
+    # ❌ reject garbage patterns
+    bad_patterns = [
+        "some_", "enable_condition", "expected_",
+        "-> ->", "|-> |->"
+    ]
+
+    for p in bad_patterns:
+        if p in block:
+            return False
+
+    # ❌ multiple implications
+    if block.count("|->") > 1:
+        return False
+
+    # ❌ empty property
+    if "property" in block and "endproperty" in block:
+        lines = block.split("\n")
+        if len(lines) <= 3:
+            return False
+
+    return True
+
+
 def clean_assertions(text):
-    valid_blocks = []
+    blocks = re.split(r'\n\s*\n', text)
 
-    # ✅ 1. Capture property + assert blocks
-    pattern1 = r'(property[\s\S]*?endproperty\s*assert property\s*\(.*?\);)'
-    matches1 = re.findall(pattern1, text, re.MULTILINE)
+    cleaned = []
 
-    # ✅ 2. Capture inline assertions
-    pattern2 = r'(assert property\s*\(.*?\);)'
-    matches2 = re.findall(pattern2, text, re.MULTILINE)
+    for b in blocks:
+        if "property" in b and is_valid_assertion(b):
+            cleaned.append(b.strip())
 
-    all_blocks = matches1 + matches2
+    return "\n\n".join(cleaned)
 
-    for b in all_blocks:
-        b = b.strip()
-
-        # Must have temporal operator
-        if "|->" not in b and "|=>" not in b:
-            continue
-
-        # ❌ Remove useless always-true logic
-        if "<" in b and "+ 1" in b:
-            continue
-
-        # ❌ Remove weak dependency guesses
-        if "dependency" in b or "throughout" in b:
-            continue
-
-        valid_blocks.append(b)
-
-    return "\n\n".join(valid_blocks)

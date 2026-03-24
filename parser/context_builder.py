@@ -1,129 +1,60 @@
-def build_context(rtl_code, cone, target, paths=None):
-    lines = rtl_code.split("\n")
+import re
 
-    header = """
-input clk;
-input reset;
+def extract_always_blocks(rtl_code):
+    return re.findall(r'always\s*@.*?end', rtl_code, re.DOTALL)
+
+
+def extract_assigns(rtl_code):
+    return re.findall(r'assign\s+.*?;', rtl_code)
+
+
+def match_signal(sig, text):
+    sig = sig.split(".")[-1]
+    return (
+        sig in text or
+        any(sig in word for word in text.split())
+    )
+
+
+def build_context(rtl_code, cone, target, paths):
+    context_blocks = []
+
+    always_blocks = extract_always_blocks(rtl_code)
+    assigns = extract_assigns(rtl_code)
+
+    target_base = target.split(".")[-1]
+
+    # -------- 1. TARGET MATCH --------
+    for block in always_blocks:
+        if target_base in block:
+            context_blocks.append(block.strip())
+
+    # -------- 2. CONE MATCH --------
+    for block in always_blocks:
+        if any(match_signal(sig, block) for sig in cone):
+            context_blocks.append(block.strip())
+
+    # -------- 3. ASSIGN MATCH --------
+    for stmt in assigns:
+        if target_base in stmt or any(match_signal(sig, stmt) for sig in cone):
+            context_blocks.append(stmt.strip())
+
+    # -------- 4. FALLBACK --------
+    if not context_blocks:
+        context_blocks = always_blocks[:3]
+
+    # -------- CLEAN --------
+    context_blocks = list(set(context_blocks))[:5]
+
+    path_text = "\n".join([
+        "// Path: " + " -> ".join(p)
+        for p in paths[:5]
+    ])
+
+    return f"""
+// ===== RTL LOGIC =====
+{chr(10).join(context_blocks)}
+
+// ===== DEPENDENCY PATHS =====
+{path_text}
 """
-
-    # -------- STEP 1: Extract COMPLETE always blocks --------
-    def extract_blocks(lines):
-        blocks = []
-        current = []
-        inside = False
-        end_count = 0
-
-        for line in lines:
-            stripped = line.strip()
-
-            if stripped.startswith("always"):
-                inside = True
-                current = [line]
-                end_count = 0
-                continue
-
-            if inside:
-                current.append(line)
-
-                # Count begins
-                if "begin" in stripped:
-                    end_count += 1
-
-                # Count ends
-                if stripped == "end":
-                    end_count -= 1
-
-                # Close only when all begins are matched
-                if end_count <= 0 and stripped == "end":
-                    blocks.append("\n".join(current))
-                    inside = False
-
-        return blocks
-
-    blocks = extract_blocks(lines)
-
-    # -------- STEP 2: helpers --------
-    def is_structure(line):
-        keywords = ["if", "else", "case", "endcase", "begin", "end", "always"]
-        return any(k in line for k in keywords)
-
-    def is_assignment(line):
-        return "<=" in line or "=" in line
-
-    short_target = target.split(".")[-1]
-
-    def is_target_assignment(line):
-        return f"{short_target} <=" in line or f"{short_target} =" in line
-
-    def contains_cone_signal(line):
-        return any(sig.split(".")[-1] in line for sig in cone)
-
-    # -------- STEP 3: TARGET + CONE slicing --------
-    sliced_blocks = []
-
-    for block in blocks:
-        new_block = []
-        keep_block = False
-
-        for line in block.split("\n"):
-            stripped = line.strip()
-
-            # Always keep structure
-            if is_structure(stripped):
-                new_block.append(line)
-                continue
-
-            # Keep target assignment (CRITICAL)
-            if is_assignment(stripped) and is_target_assignment(stripped):
-                new_block.append(line)
-                keep_block = True
-                continue
-
-            # Keep assignments related to cone (filtered)
-            if is_assignment(stripped) and contains_cone_signal(stripped):
-                new_block.append(line)
-                continue
-
-            # Keep conditions involving cone
-            if contains_cone_signal(stripped):
-                new_block.append(line)
-
-        if keep_block:
-            # Only keep small blocks
-            if len(block.split("\n")) < 80:
-                sliced_blocks.append(block)
-
-    # -------- STEP 4: Deduplicate --------
-    unique_blocks = []
-    seen = set()
-
-    for block in sliced_blocks:
-        key = "\n".join([l.strip() for l in block.split("\n")])
-        if key not in seen:
-            seen.add(key)
-            unique_blocks.append(block)
-
-    # -------- STEP 5: FINAL FILTER --------
-    final_blocks = []
-
-    for block in unique_blocks:
-        if any(is_target_assignment(line) for line in block.split("\n")):
-            final_blocks.append(block)
-
-    # -------- STEP 6: PATH CONTEXT (🔥 NEW FEATURE) --------
-    path_text = ""
-
-    if paths:
-        path_text += "\n// ===== Dependency Paths =====\n"
-        for i, path in enumerate(paths[:5]):  # limit paths
-            short_path = []
-            prev = None
-            for p in path:
-                s = p.split(".")[-1]
-                if s != prev:
-                    short_path.append(s)
-                prev = s
-            path_text += f"// Path {i+1}: " + " -> ".join(short_path) + "\n"
-
-    # -------- STEP 7: RETURN --------
-    return header + path_text + "\n\n".join(final_blocks)

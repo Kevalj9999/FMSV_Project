@@ -29,7 +29,7 @@ def rank_deps(deps):
     return sorted(deps, key=score, reverse=True)
 
 
-def extract_smart_cone(graph, target, max_depth=5, max_paths=50):
+def extract_smart_cone(graph, target, max_depth=6, max_paths=50):
     paths = []
 
     def dfs(node, path, depth):
@@ -71,7 +71,7 @@ def extract_smart_cone(graph, target, max_depth=5, max_paths=50):
     # -------- Remove noise --------
     cone = {
         s for s in cone
-        if '.' in s and not s.endswith(("clk", "reset"))
+        if not s.endswith(("clk", "reset"))
     }
 
     # -------- Sort cone --------

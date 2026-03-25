@@ -1,0 +1,1421 @@
+
+===== TARGET: mem_data =====
+
+// ===== RTL LOGIC =====
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst) rxd_buf <=  2'h3;
+  else         rxd_buf <=  {rxd_buf[0], uart_rxd};
+
+// Majority decision
+//------------------------
+reg        rxd_maj;
+
+wire       rxd_maj_nxt = (uart_rxd   & rxd_buf[0]) |
+                         (uart_rxd   & rxd_buf[1]) |
+                         (rxd_buf[0] & rxd_buf[1]);
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst) rxd_maj <=  1'b1;
+  else         rxd_maj <=  rxd_maj_nxt;
+
+wire rxd_s    =  rxd_maj;
+wire rxd_fe   =  rxd_maj & ~rxd_maj_nxt;
+wire rxd_re   = ~rxd_maj &  rxd_maj_nxt;
+wire rxd_edge =  rxd_maj ^  rxd_maj_nxt;
+
+//=============================================================================
+// 2)  UART STATE MACHINE
+//=============================================================================
+
+// Receive state
+//------------------------
+reg   [2:0] uart_state;
+reg   [2:0] uart_state_nxt;
+
+wire        sync_done;
+wire        xfer_done;
+reg  [19:0] xfer_buf;
+wire [19:0] xfer_buf_nxt;
+
+// State machine definition
+parameter  RX_SYNC  = 3'h0;
+parameter  RX_CMD   = 3'h1;
+parameter  RX_DATA1 = 3'h2;
+parameter  RX_DATA2 = 3'h3;
+parameter  TX_DATA1 = 3'h4;
+parameter  TX_DATA2 = 3'h5;
+
+// State transition
+always @(uart_state or xfer_buf_nxt or mem_burst or mem_burst_wr or mem_burst_rd or mem_burst_end
+always @(posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)                          uart_state <= RX_SYNC;
+  else if (xfer_done    | sync_done |
+           mem_burst_wr | mem_burst_rd) uart_state <= uart_state_nxt;
+
+// Utility signals
+wire cmd_valid = (uart_state==RX_CMD) & xfer_done;
+wire rx_active = (uart_state==RX_DATA1) | (uart_state==RX_DATA2) | (uart_state==RX_CMD);
+wire tx_active = (uart_state==TX_DATA1) | (uart_state==TX_DATA2);
+
+
+//=============================================================================
+// 3)  UART SYNCHRONIZATION
+//=============================================================================
+// After DBG_RST, the host needs to fist send
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)                       xfer_bit <=  4'h0;
+  else if (txd_start | rxd_start)    xfer_bit <=  4'h1;
+  else if (xfer_done)                xfer_bit <=  4'h0;
+  else if (xfer_bit_inc)             xfer_bit <=  xfer_bit+4'h1;
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)                       xfer_cnt <=  {`DBG_UART_XFER_CNT_W{1'b0}};
+  else if (rx_active & rxd_edge)     xfer_cnt <=  {1'b0, bit_cnt_max[`DBG_UART_XFER_CNT_W-1:1]};
+  else if (txd_start | xfer_bit_inc) xfer_cnt <=  bit_cnt_max;
+  else if (|xfer_cnt)                xfer_cnt <=  xfer_cnt+{`DBG_UART_XFER_CNT_W{1'b1}};
+
+
+// Receive/Transmit buffer
+//-------------------------
+assign xfer_buf_nxt =  {rxd_s, xfer_buf[19:1]};
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)           xfer_buf <=  20'h00000;
+  else if (dbg_rd_rdy)   xfer_buf <=  {1'b1, dbg_dout[15:8], 2'b01, dbg_dout[7:0], 1'b0};
+  else if (xfer_bit_inc) xfer_buf <=  xfer_buf_nxt;
+
+
+// Generate TXD output
+//------------------------
+reg dbg_uart_txd;
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)                       dbg_uart_txd <=  1'b1;
+  else if (xfer_bit_inc & tx_active) dbg_uart_txd <=  xfer_buf[0];
+
+
+//=============================================================================
+// 5) INTERFACE TO DEBUG REGISTERS
+//=============================================================================
+
+reg [5:0] dbg_addr;
+ always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)        dbg_addr <=  6'h00;
+  else if (cmd_valid) dbg_addr <=  xfer_buf_nxt[`DBG_UART_ADDR];
+
+reg       dbg_bw;
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)        dbg_bw   <=  1'b0;
+  else if (cmd_valid) dbg_bw   <=  xfer_buf_nxt[`DBG_UART_BW];
+
+wire        dbg_din_bw =  mem_burst  ? mem_bw : dbg_bw;
+
+wire [15:0] dbg_din    =  dbg_din_bw ? {8'h00,           xfer_buf_nxt[18:11]} :
+                                       {xfer_buf_nxt[18:11], xfer_buf_nxt[9:2]};
+wire        dbg_wr     = (xfer_done & (uart_state==RX_DATA2));
+wire        dbg_rd     = mem_burst ? (xfer_done & (uart_state==TX_DATA2)) :
+                                     (cmd_valid & ~xfer_buf_nxt[`DBG_UART_WR]) | mem_burst_rd;
+
+
+
+end
+always @ (posedge mclk or posedge puc_rst)
+  if (puc_rst)  dma_ready_dly <=  1'b0;
+  else          dma_ready_dly <=  dma_ready;
+
+// Mux between debug and master interface
+assign      ext_mem_en    =  dbg_mem_en | dma_en;
+wire  [1:0] ext_mem_wr    =  dbg_mem_en ? dbg_mem_wr    :  dma_we;
+wire [15:1] ext_mem_addr  =  dbg_mem_en ? dbg_mem_addr  :  dma_addr;
+wire [15:0] ext_mem_dout  =  dbg_mem_en ? dbg_mem_dout  :  dma_din;
+
+// External interface read data
+assign      dbg_mem_din   =  ext_mem_din;
+assign      dma_dout      =  ext_mem_din & {16{dma_ready_dly}};
+
+
+`else
+// Debug-interface always stops the CPU
+assign      cpu_halt_cmd  =  dbg_halt_cmd;
+
+// Master interface access is always ready with error response when excluded
+assign      dma_resp      =  1'b1;
+assign      dma_ready     =  1'b1;
+
+// Debug interface only
+assign      ext_mem_en    =  dbg_mem_en;
+wire  [1:0] ext_mem_wr    =  dbg_mem_wr;
+wire [15:1] ext_mem_addr  =  dbg_mem_addr;
+wire [15:0] ext_mem_dout  =  dbg_mem_dout;
+
+// External interface read data
+assign      dbg_mem_din   =  ext_mem_din;
+assign      dma_dout      =  16'h0000;
+
+// LINT Cleanup
+wire [15:1] UNUSED_dma_addr     = dma_addr;
+wire [15:0] UNUSED_dma_din      = dma_din;
+wire        UNUSED_dma_en       = dma_en;
+wire        UNUSED_dma_priority = dma_priority;
+wire  [1:0] UNUSED_dma_we       = dma_we;
+
+`end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup_sel <=  1'b0;
+  else if (fe_pmem_save)    pmem_dout_bckup_sel <=  1'b1;
+  else if (fe_pmem_restore) pmem_dout_bckup_sel <=  1'b0;
+
+assign fe_mdb_in = pmem_dout_bckup_sel ? pmem_dout_bckup : pmem_dout;
+
+
+//------------------------------------------
+// Execution-Unit data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg [1:0] eu_mdb_in_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  eu_mdb_in_sel  <= 2'b00;
+  else          eu_mdb_in_sel  <= {eu_pmem_en, eu_per_en};
+
+// Mux
+assign          eu_mdb_in       = eu_mdb_in_sel[1] ? pmem_dout    :
+                                  eu_mdb_in_sel[0] ? per_dout_val : dmem_dout;
+
+
+//------------------------------------------
+// External Master/Debug interface data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg   [1:0] ext_mem_din_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  ext_mem_din_sel <= 2'b00;
+  else          ext_mem_din_sel <= {ext_pmem_en, ext_per_en};
+
+// Mux
+assign          ext_mem_din      = ext_mem_din_sel[1] ? pmem_dout    :
+                                   ext_mem_din_sel[0] ? per_dout_val : dmem_dout;
+
+
+end
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)          cpu_stat <=  2'b00;
+  else if (cpu_stat_wr) cpu_stat <= ((cpu_stat & cpu_stat_clr) | cpu_stat_set);
+  else                  cpu_stat <=  (cpu_stat                 | cpu_stat_set);
+
+wire  [7:0] cpu_stat_full = {brk3_pnd, brk2_pnd, brk1_pnd, brk0_pnd,
+                             cpu_stat, 1'b0, dbg_halt_st};
+
+
+//=============================================================================
+// 4)  REGISTER: MEMORY INTERFACE
+//=============================================================================
+
+// MEM_CTL Register
+//-----------------------------------------------------------------------------
+//       7     6     5     4          3        2         1       0
+//            Reserved               B/W    MEM/REG    RD/WR   START
+//
+// START  :  -  0 : Do nothing.
+//           -  1 : Initiate memory transfer.
+//
+// RD/WR  :  -  0 : Read access.
+//           -  1 : Write access.
+//
+// MEM/REG:  -  0 : Memory access.
+//           -  1 : CPU Register access.
+//
+// B/W    :  -  0 : 16 bit access.
+//           -  1 :  8 bit access (not valid for CPU Registers).
+//
+//-----------------------------------------------------------------------------
+reg   [3:1] mem_ctl;
+
+wire        mem_ctl_wr = reg_wr[MEM_CTL];
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)         mem_ctl <=  3'h0;
+  else if (mem_ctl_wr) mem_ctl <=  dbg_din[3:1];
+
+wire  [7:0] mem_ctl_full  = {4'b0000, mem_ctl, 1'b0};
+
+reg         mem_start;
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)  mem_start <=  1'b0;
+  else          mem_start <=  mem_ctl_wr & dbg_din[0];
+
+wire        mem_bw    = mem_ctl[3];
+
+// MEM_DATA Register
+//------------------
+reg  [15:0] mem_data;
+reg  [15:0] mem_addr;
+wire        mem_access;
+
+wire        mem_data_wr = reg_wr[MEM_DATA];
+
+wire [15:0] dbg_mem_din_bw = ~mem_bw      ? dbg_mem_din                :
+                              mem_addr[0] ? {8'h00, dbg_mem_din[15:8]} :
+                                            {8'h00, dbg_mem_din[7:0]};
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)             mem_data <=  16'h0000;
+  else if (mem_data_wr)    mem_data <=  dbg_din;
+  else if (dbg_reg_rd)     mem_data <=  dbg_reg_din;
+  else if (dbg_mem_rd_dly) mem_data <=  dbg_mem_din_bw;
+
+
+// MEM_ADDR Register
+//------------------
+reg  [15:0] mem_cnt;
+
+wire        mem_addr_wr  = reg_wr[MEM_ADDR];
+wire        dbg_mem_acc  = (|dbg_mem_wr | (dbg_rd_rdy & ~mem_ctl[2]));
+wire        dbg_reg_acc  = ( dbg_reg_wr | (dbg_rd_rdy &  mem_ctl[2]));
+
+wire [15:0] mem_addr_inc = (mem_cnt==16'h0000)                       ? 16'h0000 :
+                           (mem_burst &  dbg_mem_acc & ~mem_bw)      ? 16'h0002 :
+                           (mem_burst & (dbg_mem_acc | dbg_reg_acc)) ? 16'h0001 : 16'h0000;
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)          mem_addr <=  16'h0000;
+  else if (mem_addr_wr) mem_addr <=  dbg_din;
+  else                  mem_addr <=  mem_addr + mem_addr_inc;
+
+// MEM_CNT Register
+//------------------
+
+wire        mem_cnt_wr  = reg_wr[MEM_CNT];
+
+wire [15:0] mem_cnt_dec = (mem_cnt==16'h0000)                       ? 16'h0000 :
+                          (mem_burst & (dbg_mem_acc | dbg_reg_acc)) ? 16'hffff : 16'h0000;
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)         mem_cnt <=  16'h0000;
+  else if (mem_cnt_wr) mem_cnt <=  dbg_din;
+  else                 mem_cnt <=  mem_cnt + mem_cnt_dec;
+
+
+//=============================================================================
+// 5)  BREAKPOINTS / WATCHPOINTS
+//=============================================================================
+
+`ifdef DBG_HWBRK_0
+// Hardware Breakpoint/Watchpoint Register read select
+wire [3:0] brk0_reg_rd = {reg_rd[BRK0_ADDR1],
+                          reg_rd[BRK0_ADDR0],
+                          reg_rd[BRK0_STAT],
+                          reg_rd[BRK0_CTL]};
+
+// Hardware Breakpoint/Watchpoint Register write select
+wire [3:0] brk0_reg_wr = {reg_wr[BRK0_ADDR1],
+                          reg_wr[BRK0_ADDR0],
+                          reg_wr[BRK0_STAT],
+                          reg_wr[BRK0_CTL]};
+
+omsp_dbg_hwbrk dbg_hwbr_0 (
+
+// OUTPUTs
+    .brk_halt     (brk0_halt),    // Hardware breakpoint command
+    .brk_pnd      (brk0_pnd),     // Hardware break/watch-point pend
+
+// ===== DEPENDENCY PATHS =====
+// Path: mem_data
+// Path: mem_data -> mem_ctl
+// Path: mem_data -> mem_cnt
+// Path: mem_data -> mem_addr
+
+
+===== TARGET: per_addr =====
+
+// ===== RTL LOGIC =====
+always @ (posedge dma_mclk or posedge puc_rst)
+  if (puc_rst)          bcsctl1  <=  8'h00;
+  else if (bcsctl1_wr)  bcsctl1  <=  bcsctl1_nxt & (divax_mask      |
+                                                    dma_cpuoff_mask | dma_oscoff_mask |
+                                                    dma_scg0_mask   | dma_scg1_mask   ); // Mask unused bits
+
+
+// BCSCTL2 Register
+//--------------
+reg  [7:0] bcsctl2;
+wire       bcsctl2_wr    = BCSCTL2[0] ? reg_hi_wr[BCSCTL2] : reg_lo_wr[BCSCTL2];
+wire [7:0] bcsctl2_nxt   = BCSCTL2[0] ? per_din[15:8]      : per_din[7:0];
+
+`ifdef MCLK_MUX
+wire [7:0] selmx_mask = 8'h80;
+`else
+wire [7:0] selmx_mask = 8'h00;
+`end
+always @ (posedge dma_mclk or posedge puc_rst)
+  if (puc_rst)          bcsctl2  <=  8'h00;
+  else if (bcsctl2_wr)  bcsctl2  <=  bcsctl2_nxt & ( sels_mask  | divsx_mask |
+                                                     selmx_mask | divmx_mask); // Mask unused bits
+
+
+//============================================================================
+// 4) DATA OUTPUT GENERATION
+//============================================================================
+
+// Data output mux
+wire [15:0] bcsctl1_rd   = {8'h00, (bcsctl1  & {8{reg_rd[BCSCTL1]}})}  << (8 & {4{BCSCTL1[0]}});
+wire [15:0] bcsctl2_rd   = {8'h00, (bcsctl2  & {8{reg_rd[BCSCTL2]}})}  << (8 & {4{BCSCTL2[0]}});
+
+wire [15:0] per_dout =  bcsctl1_rd   |
+                        bcsctl2_rd;
+
+
+//=============================================================================
+// 5)  DCO_CLK / LFXT_CLK INTERFACES (WAKEUP, ENABLE, ...)
+//=============================================================================
+
+`ifdef ASIC_CLOCKING
+   wire cpuoff_and_mclk_enable;
+   wire cpuoff_and_mclk_dma_enable;
+   wire cpuoff_and_mclk_dma_wkup;
+  `ifdef CPUOFF_EN
+   omsp_and_gate and_cpuoff_mclk_en       (.y(cpuoff_and_mclk_enable),     .a(cpuoff),               .b(mclk_enable));
+    `ifdef DMA_IF_EN
+   omsp_and_gate and_cpuoff_mclk_dma_en   (.y(cpuoff_and_mclk_dma_enable), .a(bcsctl1[`DMA_CPUOFF]), .b(mclk_dma_enable));
+   omsp_and_gate and_cpuoff_mclk_dma_wkup (.y(cpuoff_and_mclk_dma_wkup),   .a(bcsctl1[`DMA_CPUOFF]), .b(mclk_dma_wkup));
+    `else
+   assign cpuoff_and_mclk_dma_enable  = 1'b0;
+   assign cpuoff_and_mclk_dma_wkup    = 1'b0;
+    `end
+always @ (posedge mclk_op1 or posedge puc_rst)
+  if (puc_rst)      op1 <=  16'h0000;
+`ifdef CLOCK_GATING
+  else              op1 <=  per_din_msk;
+`else
+  else if (op1_wr)  op1 <=  per_din_msk;
+`end
+always @ (posedge mclk_op2 or posedge puc_rst)
+  if (puc_rst)      op2 <=  16'h0000;
+`ifdef CLOCK_GATING
+  else              op2 <=  per_din_msk;
+`else
+  else if (op2_wr)  op2 <=  per_din_msk;
+`end
+always @ (posedge mclk_reslo or posedge puc_rst)
+  if (puc_rst)         reslo <=  16'h0000;
+  else if (reslo_wr)   reslo <=  per_din_msk;
+  else if (result_clr) reslo <=  16'h0000;
+`ifdef CLOCK_GATING
+  else                 reslo <=  reslo_nxt;
+`else
+  else if (result_wr)  reslo <=  reslo_nxt;
+`end
+always @ (posedge mclk_reshi or posedge puc_rst)
+  if (puc_rst)         reshi <=  16'h0000;
+  else if (reshi_wr)   reshi <=  per_din_msk;
+  else if (result_clr) reshi <=  16'h0000;
+`ifdef CLOCK_GATING
+  else                 reshi <=  reshi_nxt;
+`else
+  else if (result_wr)  reshi <=  reshi_nxt;
+`end
+
+// ===== DEPENDENCY PATHS =====
+// Path: per_addr
+// Path: per_addr -> per_en
+// Path: per_addr -> per_we
+
+
+===== TARGET: dmem_cen =====
+
+// ===== RTL LOGIC =====
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup_sel <=  1'b0;
+  else if (fe_pmem_save)    pmem_dout_bckup_sel <=  1'b1;
+  else if (fe_pmem_restore) pmem_dout_bckup_sel <=  1'b0;
+
+assign fe_mdb_in = pmem_dout_bckup_sel ? pmem_dout_bckup : pmem_dout;
+
+
+//------------------------------------------
+// Execution-Unit data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg [1:0] eu_mdb_in_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  eu_mdb_in_sel  <= 2'b00;
+  else          eu_mdb_in_sel  <= {eu_pmem_en, eu_per_en};
+
+// Mux
+assign          eu_mdb_in       = eu_mdb_in_sel[1] ? pmem_dout    :
+                                  eu_mdb_in_sel[0] ? per_dout_val : dmem_dout;
+
+
+//------------------------------------------
+// External Master/Debug interface data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg   [1:0] ext_mem_din_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  ext_mem_din_sel <= 2'b00;
+  else          ext_mem_din_sel <= {ext_pmem_en, ext_per_en};
+
+// Mux
+assign          ext_mem_din      = ext_mem_din_sel[1] ? pmem_dout    :
+                                   ext_mem_din_sel[0] ? per_dout_val : dmem_dout;
+
+
+end
+assign      dma_resp      = ~dbg_mem_en & ~(ext_dmem_sel | ext_pmem_sel | ext_per_sel) & dma_en;
+assign      dma_ready     = ~dbg_mem_en &  (ext_dmem_en  | ext_pmem_en  | ext_per_en | dma_resp);
+assign             ext_dmem_en   = ext_mem_en &  ext_dmem_sel & ~eu_dmem_en;
+always @(posedge mclk_pc or posedge puc_rst)
+  if (puc_rst)  pc <= 16'h0000;
+  else          pc <= pc_nxt;
+
+// Check if Program-Memory has been busy in order to retry Program-Memory access
+reg pmem_busy;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  pmem_busy <= 1'b0;
+  else          pmem_busy <= fe_pmem_wait;
+
+// Memory interface
+wire [15:0] mab      = pc_nxt;
+wire        mb_en    = fetch | pc_sw_wr | (i_state==I_IRQ_FETCH) | pmem_busy | (cpu_halt_st & ~cpu_halt_req);
+
+
+//
+// 5.2) INSTRUCTION REGISTER
+//--------------------------------
+
+// Instruction register
+wire [15:0] ir  = mdb_in;
+
+// Detect if source extension word is required
+wire is_sext = (inst_as[`IDX] | inst_as[`SYMB] | inst_as[`ABS] | inst_as[`IMM]);
+
+// For the Symbolic addressing mode, add -2 to the extension word in order
+// to make up for the PC address
+wire [15:0] ext_incr = ((i_state==I_EXT1)     &  inst_as[`SYMB]) |
+                       ((i_state==I_EXT2)     &  inst_ad[`SYMB]) |
+                       ((i_state==I_EXT1)     & ~inst_as[`SYMB] &
+                       ~(i_state_nxt==I_EXT2) &  inst_ad[`SYMB])   ? 16'hfffe : 16'h0000;
+
+wire [15:0] ext_nxt  = ir + ext_incr;
+
+// Store source extension word
+reg [15:0] inst_sext;
+
+`ifdef CLOCK_GATING
+wire       inst_sext_en  = (decode & is_const)                 |
+                           (decode & inst_type_nxt[`INST_JMP]) |
+                           ((i_state==I_EXT1) & is_sext);
+wire       mclk_inst_sext;
+omsp_clock_gate clock_gate_inst_sext (.gclk(mclk_inst_sext),
+                                      .clk (mclk), .enable(inst_sext_en), .scan_enable(scan_enable));
+`else
+wire       mclk_inst_sext = mclk;
+`end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst) fe_pmem_en_dly <=  1'b0;
+  else         fe_pmem_en_dly <=  fe_pmem_en;
+
+wire fe_pmem_save    = (~fe_pmem_en &  fe_pmem_en_dly) & ~cpu_halt_st;
+wire fe_pmem_restore = ( fe_pmem_en & ~fe_pmem_en_dly) |  cpu_halt_st;
+
+`ifdef CLOCK_GATING
+wire mclk_bckup_gated;
+omsp_clock_gate clock_gate_bckup (.gclk(mclk_bckup_gated),
+                                  .clk (mclk), .enable(fe_pmem_save), .scan_enable(scan_enable));
+`define MCLK_BCKUP           mclk_bckup_gated
+`else
+wire    UNUSED_scan_enable = scan_enable;
+`define MCLK_BCKUP           mclk        // use macro to solve delta cycle issues with some mixed VHDL/Verilog simulators
+`end
+
+// ===== DEPENDENCY PATHS =====
+// Path: dmem_cen
+// Path: dmem_cen -> pmem_cen
+// Path: dmem_cen -> pmem_cen -> pmem_addr
+// Path: dmem_cen -> pmem_din
+// Path: dmem_cen -> pmem_din -> pmem_wen
+
+
+===== TARGET: dma_en =====
+
+// ===== RTL LOGIC =====
+always @ (posedge dma_mclk or posedge puc_rst)
+  if (puc_rst)          bcsctl1  <=  8'h00;
+  else if (bcsctl1_wr)  bcsctl1  <=  bcsctl1_nxt & (divax_mask      |
+                                                    dma_cpuoff_mask | dma_oscoff_mask |
+                                                    dma_scg0_mask   | dma_scg1_mask   ); // Mask unused bits
+
+
+// BCSCTL2 Register
+//--------------
+reg  [7:0] bcsctl2;
+wire       bcsctl2_wr    = BCSCTL2[0] ? reg_hi_wr[BCSCTL2] : reg_lo_wr[BCSCTL2];
+wire [7:0] bcsctl2_nxt   = BCSCTL2[0] ? per_din[15:8]      : per_din[7:0];
+
+`ifdef MCLK_MUX
+wire [7:0] selmx_mask = 8'h80;
+`else
+wire [7:0] selmx_mask = 8'h00;
+`end
+always @ (posedge dma_mclk or posedge puc_rst)
+  if (puc_rst)          bcsctl2  <=  8'h00;
+  else if (bcsctl2_wr)  bcsctl2  <=  bcsctl2_nxt & ( sels_mask  | divsx_mask |
+                                                     selmx_mask | divmx_mask); // Mask unused bits
+
+
+//============================================================================
+// 4) DATA OUTPUT GENERATION
+//============================================================================
+
+// Data output mux
+wire [15:0] bcsctl1_rd   = {8'h00, (bcsctl1  & {8{reg_rd[BCSCTL1]}})}  << (8 & {4{BCSCTL1[0]}});
+wire [15:0] bcsctl2_rd   = {8'h00, (bcsctl2  & {8{reg_rd[BCSCTL2]}})}  << (8 & {4{BCSCTL2[0]}});
+
+wire [15:0] per_dout =  bcsctl1_rd   |
+                        bcsctl2_rd;
+
+
+//=============================================================================
+// 5)  DCO_CLK / LFXT_CLK INTERFACES (WAKEUP, ENABLE, ...)
+//=============================================================================
+
+`ifdef ASIC_CLOCKING
+   wire cpuoff_and_mclk_enable;
+   wire cpuoff_and_mclk_dma_enable;
+   wire cpuoff_and_mclk_dma_wkup;
+  `ifdef CPUOFF_EN
+   omsp_and_gate and_cpuoff_mclk_en       (.y(cpuoff_and_mclk_enable),     .a(cpuoff),               .b(mclk_enable));
+    `ifdef DMA_IF_EN
+   omsp_and_gate and_cpuoff_mclk_dma_en   (.y(cpuoff_and_mclk_dma_enable), .a(bcsctl1[`DMA_CPUOFF]), .b(mclk_dma_enable));
+   omsp_and_gate and_cpuoff_mclk_dma_wkup (.y(cpuoff_and_mclk_dma_wkup),   .a(bcsctl1[`DMA_CPUOFF]), .b(mclk_dma_wkup));
+    `else
+   assign cpuoff_and_mclk_dma_enable  = 1'b0;
+   assign cpuoff_and_mclk_dma_wkup    = 1'b0;
+    `end
+always @ (posedge nodiv_mclk or posedge por)
+  if (por) lfxt_clk_dly <=  1'b0;
+  else     lfxt_clk_dly <=  lfxt_clk_s;
+
+wire   lfxt_clk_en = (lfxt_clk_s & ~lfxt_clk_dly) & (~oscoff | (mclk_dma_enable & bcsctl1[`DMA_OSCOFF]));
+assign lfxt_enable = 1'b1;
+assign lfxt_wkup   = 1'b0;
+`end
+always @ (posedge nodiv_mclk or posedge puc_rst)
+  if (puc_rst)                       mclk_div <=  3'h0;
+  else if ((bcsctl2[`DIVMx]!=2'b00)) mclk_div <=  mclk_div+3'h1;
+
+  wire  mclk_div_sel    = (bcsctl2[`DIVMx]==2'b00) ?  1'b1          :
+                          (bcsctl2[`DIVMx]==2'b01) ?  mclk_div[0]   :
+                          (bcsctl2[`DIVMx]==2'b10) ? &mclk_div[1:0] :
+                                                     &mclk_div[2:0] ;
+
+  wire  mclk_div_en     = mclk_active     & mclk_div_sel;
+  wire  mclk_dma_div_en = mclk_dma_active & mclk_div_sel;
+
+`else
+  wire  mclk_div_en     = mclk_active;
+  wire  mclk_dma_div_en = mclk_dma_active;
+`end
+always @ (posedge mclk or posedge puc_rst)
+  if (puc_rst)  dma_ready_dly <=  1'b0;
+  else          dma_ready_dly <=  dma_ready;
+
+// Mux between debug and master interface
+assign      ext_mem_en    =  dbg_mem_en | dma_en;
+wire  [1:0] ext_mem_wr    =  dbg_mem_en ? dbg_mem_wr    :  dma_we;
+wire [15:1] ext_mem_addr  =  dbg_mem_en ? dbg_mem_addr  :  dma_addr;
+wire [15:0] ext_mem_dout  =  dbg_mem_en ? dbg_mem_dout  :  dma_din;
+
+// External interface read data
+assign      dbg_mem_din   =  ext_mem_din;
+assign      dma_dout      =  ext_mem_din & {16{dma_ready_dly}};
+
+
+`else
+// Debug-interface always stops the CPU
+assign      cpu_halt_cmd  =  dbg_halt_cmd;
+
+// Master interface access is always ready with error response when excluded
+assign      dma_resp      =  1'b1;
+assign      dma_ready     =  1'b1;
+
+// Debug interface only
+assign      ext_mem_en    =  dbg_mem_en;
+wire  [1:0] ext_mem_wr    =  dbg_mem_wr;
+wire [15:1] ext_mem_addr  =  dbg_mem_addr;
+wire [15:0] ext_mem_dout  =  dbg_mem_dout;
+
+// External interface read data
+assign      dbg_mem_din   =  ext_mem_din;
+assign      dma_dout      =  16'h0000;
+
+// LINT Cleanup
+wire [15:1] UNUSED_dma_addr     = dma_addr;
+wire [15:0] UNUSED_dma_din      = dma_din;
+wire        UNUSED_dma_en       = dma_en;
+wire        UNUSED_dma_priority = dma_priority;
+wire  [1:0] UNUSED_dma_we       = dma_we;
+
+`end
+assign      cpu_halt_cmd  =  dbg_halt_cmd | (dma_en & dma_priority);
+
+// ===== DEPENDENCY PATHS =====
+// Path: dma_en
+// Path: dma_en -> per_en
+// Path: dma_en -> dma_wkup
+// Path: dma_en -> dma_wkup -> dma_priority
+
+
+===== TARGET: dmem_addr =====
+
+// ===== RTL LOGIC =====
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup_sel <=  1'b0;
+  else if (fe_pmem_save)    pmem_dout_bckup_sel <=  1'b1;
+  else if (fe_pmem_restore) pmem_dout_bckup_sel <=  1'b0;
+
+assign fe_mdb_in = pmem_dout_bckup_sel ? pmem_dout_bckup : pmem_dout;
+
+
+//------------------------------------------
+// Execution-Unit data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg [1:0] eu_mdb_in_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  eu_mdb_in_sel  <= 2'b00;
+  else          eu_mdb_in_sel  <= {eu_pmem_en, eu_per_en};
+
+// Mux
+assign          eu_mdb_in       = eu_mdb_in_sel[1] ? pmem_dout    :
+                                  eu_mdb_in_sel[0] ? per_dout_val : dmem_dout;
+
+
+//------------------------------------------
+// External Master/Debug interface data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg   [1:0] ext_mem_din_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  ext_mem_din_sel <= 2'b00;
+  else          ext_mem_din_sel <= {ext_pmem_en, ext_per_en};
+
+// Mux
+assign          ext_mem_din      = ext_mem_din_sel[1] ? pmem_dout    :
+                                   ext_mem_din_sel[0] ? per_dout_val : dmem_dout;
+
+
+end
+assign      dma_resp      = ~dbg_mem_en & ~(ext_dmem_sel | ext_pmem_sel | ext_per_sel) & dma_en;
+assign      dma_ready     = ~dbg_mem_en &  (ext_dmem_en  | ext_pmem_en  | ext_per_en | dma_resp);
+assign             ext_pmem_sel  = (ext_mem_addr[15:1]>=(PMEM_OFFSET>>1));
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)                       xfer_bit <=  4'h0;
+  else if (txd_start | rxd_start)    xfer_bit <=  4'h1;
+  else if (xfer_done)                xfer_bit <=  4'h0;
+  else if (xfer_bit_inc)             xfer_bit <=  xfer_bit+4'h1;
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)                       xfer_cnt <=  {`DBG_UART_XFER_CNT_W{1'b0}};
+  else if (rx_active & rxd_edge)     xfer_cnt <=  {1'b0, bit_cnt_max[`DBG_UART_XFER_CNT_W-1:1]};
+  else if (txd_start | xfer_bit_inc) xfer_cnt <=  bit_cnt_max;
+  else if (|xfer_cnt)                xfer_cnt <=  xfer_cnt+{`DBG_UART_XFER_CNT_W{1'b1}};
+
+
+// Receive/Transmit buffer
+//-------------------------
+assign xfer_buf_nxt =  {rxd_s, xfer_buf[19:1]};
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)           xfer_buf <=  20'h00000;
+  else if (dbg_rd_rdy)   xfer_buf <=  {1'b1, dbg_dout[15:8], 2'b01, dbg_dout[7:0], 1'b0};
+  else if (xfer_bit_inc) xfer_buf <=  xfer_buf_nxt;
+
+
+// Generate TXD output
+//------------------------
+reg dbg_uart_txd;
+
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)                       dbg_uart_txd <=  1'b1;
+  else if (xfer_bit_inc & tx_active) dbg_uart_txd <=  xfer_buf[0];
+
+
+//=============================================================================
+// 5) INTERFACE TO DEBUG REGISTERS
+//=============================================================================
+
+reg [5:0] dbg_addr;
+ always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)        dbg_addr <=  6'h00;
+  else if (cmd_valid) dbg_addr <=  xfer_buf_nxt[`DBG_UART_ADDR];
+
+reg       dbg_bw;
+always @ (posedge dbg_clk or posedge dbg_rst)
+  if (dbg_rst)        dbg_bw   <=  1'b0;
+  else if (cmd_valid) dbg_bw   <=  xfer_buf_nxt[`DBG_UART_BW];
+
+wire        dbg_din_bw =  mem_burst  ? mem_bw : dbg_bw;
+
+wire [15:0] dbg_din    =  dbg_din_bw ? {8'h00,           xfer_buf_nxt[18:11]} :
+                                       {xfer_buf_nxt[18:11], xfer_buf_nxt[9:2]};
+wire        dbg_wr     = (xfer_done & (uart_state==RX_DATA2));
+wire        dbg_rd     = mem_burst ? (xfer_done & (uart_state==TX_DATA2)) :
+                                     (cmd_valid & ~xfer_buf_nxt[`DBG_UART_WR]) | mem_burst_rd;
+
+
+
+end
+always @ (posedge mclk or posedge puc_rst)
+  if (puc_rst)  dma_ready_dly <=  1'b0;
+  else          dma_ready_dly <=  dma_ready;
+
+// Mux between debug and master interface
+assign      ext_mem_en    =  dbg_mem_en | dma_en;
+wire  [1:0] ext_mem_wr    =  dbg_mem_en ? dbg_mem_wr    :  dma_we;
+wire [15:1] ext_mem_addr  =  dbg_mem_en ? dbg_mem_addr  :  dma_addr;
+wire [15:0] ext_mem_dout  =  dbg_mem_en ? dbg_mem_dout  :  dma_din;
+
+// External interface read data
+assign      dbg_mem_din   =  ext_mem_din;
+assign      dma_dout      =  ext_mem_din & {16{dma_ready_dly}};
+
+
+`else
+// Debug-interface always stops the CPU
+assign      cpu_halt_cmd  =  dbg_halt_cmd;
+
+// Master interface access is always ready with error response when excluded
+assign      dma_resp      =  1'b1;
+assign      dma_ready     =  1'b1;
+
+// Debug interface only
+assign      ext_mem_en    =  dbg_mem_en;
+wire  [1:0] ext_mem_wr    =  dbg_mem_wr;
+wire [15:1] ext_mem_addr  =  dbg_mem_addr;
+wire [15:0] ext_mem_dout  =  dbg_mem_dout;
+
+// External interface read data
+assign      dbg_mem_din   =  ext_mem_din;
+assign      dma_dout      =  16'h0000;
+
+// LINT Cleanup
+wire [15:1] UNUSED_dma_addr     = dma_addr;
+wire [15:0] UNUSED_dma_din      = dma_din;
+wire        UNUSED_dma_en       = dma_en;
+wire        UNUSED_dma_priority = dma_priority;
+wire  [1:0] UNUSED_dma_we       = dma_we;
+
+`end
+
+// ===== DEPENDENCY PATHS =====
+// Path: dmem_addr
+// Path: dmem_addr -> dmem_cen
+// Path: dmem_addr -> dmem_cen -> pmem_cen
+// Path: dmem_addr -> dmem_cen -> pmem_cen -> pmem_addr
+// Path: dmem_addr -> dmem_cen -> pmem_din
+
+
+===== TARGET: pmem_addr =====
+
+// ===== RTL LOGIC =====
+always @(posedge mclk_pc or posedge puc_rst)
+  if (puc_rst)  pc <= 16'h0000;
+  else          pc <= pc_nxt;
+
+// Check if Program-Memory has been busy in order to retry Program-Memory access
+reg pmem_busy;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  pmem_busy <= 1'b0;
+  else          pmem_busy <= fe_pmem_wait;
+
+// Memory interface
+wire [15:0] mab      = pc_nxt;
+wire        mb_en    = fetch | pc_sw_wr | (i_state==I_IRQ_FETCH) | pmem_busy | (cpu_halt_st & ~cpu_halt_req);
+
+
+//
+// 5.2) INSTRUCTION REGISTER
+//--------------------------------
+
+// Instruction register
+wire [15:0] ir  = mdb_in;
+
+// Detect if source extension word is required
+wire is_sext = (inst_as[`IDX] | inst_as[`SYMB] | inst_as[`ABS] | inst_as[`IMM]);
+
+// For the Symbolic addressing mode, add -2 to the extension word in order
+// to make up for the PC address
+wire [15:0] ext_incr = ((i_state==I_EXT1)     &  inst_as[`SYMB]) |
+                       ((i_state==I_EXT2)     &  inst_ad[`SYMB]) |
+                       ((i_state==I_EXT1)     & ~inst_as[`SYMB] &
+                       ~(i_state_nxt==I_EXT2) &  inst_ad[`SYMB])   ? 16'hfffe : 16'h0000;
+
+wire [15:0] ext_nxt  = ir + ext_incr;
+
+// Store source extension word
+reg [15:0] inst_sext;
+
+`ifdef CLOCK_GATING
+wire       inst_sext_en  = (decode & is_const)                 |
+                           (decode & inst_type_nxt[`INST_JMP]) |
+                           ((i_state==I_EXT1) & is_sext);
+wire       mclk_inst_sext;
+omsp_clock_gate clock_gate_inst_sext (.gclk(mclk_inst_sext),
+                                      .clk (mclk), .enable(inst_sext_en), .scan_enable(scan_enable));
+`else
+wire       mclk_inst_sext = mclk;
+`end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst) fe_pmem_en_dly <=  1'b0;
+  else         fe_pmem_en_dly <=  fe_pmem_en;
+
+wire fe_pmem_save    = (~fe_pmem_en &  fe_pmem_en_dly) & ~cpu_halt_st;
+wire fe_pmem_restore = ( fe_pmem_en & ~fe_pmem_en_dly) |  cpu_halt_st;
+
+`ifdef CLOCK_GATING
+wire mclk_bckup_gated;
+omsp_clock_gate clock_gate_bckup (.gclk(mclk_bckup_gated),
+                                  .clk (mclk), .enable(fe_pmem_save), .scan_enable(scan_enable));
+`define MCLK_BCKUP           mclk_bckup_gated
+`else
+wire    UNUSED_scan_enable = scan_enable;
+`define MCLK_BCKUP           mclk        // use macro to solve delta cycle issues with some mixed VHDL/Verilog simulators
+`end
+always @(posedge `MCLK_BCKUP or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup     <=  16'h0000;
+`ifdef CLOCK_GATING
+  else                      pmem_dout_bckup     <=  pmem_dout;
+`else
+  else if (fe_pmem_save)    pmem_dout_bckup     <=  pmem_dout;
+`end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup_sel <=  1'b0;
+  else if (fe_pmem_save)    pmem_dout_bckup_sel <=  1'b1;
+  else if (fe_pmem_restore) pmem_dout_bckup_sel <=  1'b0;
+
+assign fe_mdb_in = pmem_dout_bckup_sel ? pmem_dout_bckup : pmem_dout;
+
+
+//------------------------------------------
+// Execution-Unit data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg [1:0] eu_mdb_in_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  eu_mdb_in_sel  <= 2'b00;
+  else          eu_mdb_in_sel  <= {eu_pmem_en, eu_per_en};
+
+// Mux
+assign          eu_mdb_in       = eu_mdb_in_sel[1] ? pmem_dout    :
+                                  eu_mdb_in_sel[0] ? per_dout_val : dmem_dout;
+
+
+//------------------------------------------
+// External Master/Debug interface data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg   [1:0] ext_mem_din_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  ext_mem_din_sel <= 2'b00;
+  else          ext_mem_din_sel <= {ext_pmem_en, ext_per_en};
+
+// Mux
+assign          ext_mem_din      = ext_mem_din_sel[1] ? pmem_dout    :
+                                   ext_mem_din_sel[0] ? per_dout_val : dmem_dout;
+
+
+end
+assign      dma_resp      = ~dbg_mem_en & ~(ext_dmem_sel | ext_pmem_sel | ext_per_sel) & dma_en;
+assign      dma_ready     = ~dbg_mem_en &  (ext_dmem_en  | ext_pmem_en  | ext_per_en | dma_resp);
+
+// ===== DEPENDENCY PATHS =====
+// Path: pmem_addr
+// Path: pmem_addr -> pmem_cen
+
+
+===== TARGET: pmem_cen =====
+
+// ===== RTL LOGIC =====
+always @(posedge mclk_pc or posedge puc_rst)
+  if (puc_rst)  pc <= 16'h0000;
+  else          pc <= pc_nxt;
+
+// Check if Program-Memory has been busy in order to retry Program-Memory access
+reg pmem_busy;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  pmem_busy <= 1'b0;
+  else          pmem_busy <= fe_pmem_wait;
+
+// Memory interface
+wire [15:0] mab      = pc_nxt;
+wire        mb_en    = fetch | pc_sw_wr | (i_state==I_IRQ_FETCH) | pmem_busy | (cpu_halt_st & ~cpu_halt_req);
+
+
+//
+// 5.2) INSTRUCTION REGISTER
+//--------------------------------
+
+// Instruction register
+wire [15:0] ir  = mdb_in;
+
+// Detect if source extension word is required
+wire is_sext = (inst_as[`IDX] | inst_as[`SYMB] | inst_as[`ABS] | inst_as[`IMM]);
+
+// For the Symbolic addressing mode, add -2 to the extension word in order
+// to make up for the PC address
+wire [15:0] ext_incr = ((i_state==I_EXT1)     &  inst_as[`SYMB]) |
+                       ((i_state==I_EXT2)     &  inst_ad[`SYMB]) |
+                       ((i_state==I_EXT1)     & ~inst_as[`SYMB] &
+                       ~(i_state_nxt==I_EXT2) &  inst_ad[`SYMB])   ? 16'hfffe : 16'h0000;
+
+wire [15:0] ext_nxt  = ir + ext_incr;
+
+// Store source extension word
+reg [15:0] inst_sext;
+
+`ifdef CLOCK_GATING
+wire       inst_sext_en  = (decode & is_const)                 |
+                           (decode & inst_type_nxt[`INST_JMP]) |
+                           ((i_state==I_EXT1) & is_sext);
+wire       mclk_inst_sext;
+omsp_clock_gate clock_gate_inst_sext (.gclk(mclk_inst_sext),
+                                      .clk (mclk), .enable(inst_sext_en), .scan_enable(scan_enable));
+`else
+wire       mclk_inst_sext = mclk;
+`end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst) fe_pmem_en_dly <=  1'b0;
+  else         fe_pmem_en_dly <=  fe_pmem_en;
+
+wire fe_pmem_save    = (~fe_pmem_en &  fe_pmem_en_dly) & ~cpu_halt_st;
+wire fe_pmem_restore = ( fe_pmem_en & ~fe_pmem_en_dly) |  cpu_halt_st;
+
+`ifdef CLOCK_GATING
+wire mclk_bckup_gated;
+omsp_clock_gate clock_gate_bckup (.gclk(mclk_bckup_gated),
+                                  .clk (mclk), .enable(fe_pmem_save), .scan_enable(scan_enable));
+`define MCLK_BCKUP           mclk_bckup_gated
+`else
+wire    UNUSED_scan_enable = scan_enable;
+`define MCLK_BCKUP           mclk        // use macro to solve delta cycle issues with some mixed VHDL/Verilog simulators
+`end
+always @(posedge `MCLK_BCKUP or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup     <=  16'h0000;
+`ifdef CLOCK_GATING
+  else                      pmem_dout_bckup     <=  pmem_dout;
+`else
+  else if (fe_pmem_save)    pmem_dout_bckup     <=  pmem_dout;
+`end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup_sel <=  1'b0;
+  else if (fe_pmem_save)    pmem_dout_bckup_sel <=  1'b1;
+  else if (fe_pmem_restore) pmem_dout_bckup_sel <=  1'b0;
+
+assign fe_mdb_in = pmem_dout_bckup_sel ? pmem_dout_bckup : pmem_dout;
+
+
+//------------------------------------------
+// Execution-Unit data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg [1:0] eu_mdb_in_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  eu_mdb_in_sel  <= 2'b00;
+  else          eu_mdb_in_sel  <= {eu_pmem_en, eu_per_en};
+
+// Mux
+assign          eu_mdb_in       = eu_mdb_in_sel[1] ? pmem_dout    :
+                                  eu_mdb_in_sel[0] ? per_dout_val : dmem_dout;
+
+
+//------------------------------------------
+// External Master/Debug interface data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg   [1:0] ext_mem_din_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  ext_mem_din_sel <= 2'b00;
+  else          ext_mem_din_sel <= {ext_pmem_en, ext_per_en};
+
+// Mux
+assign          ext_mem_din      = ext_mem_din_sel[1] ? pmem_dout    :
+                                   ext_mem_din_sel[0] ? per_dout_val : dmem_dout;
+
+
+end
+assign      dma_resp      = ~dbg_mem_en & ~(ext_dmem_sel | ext_pmem_sel | ext_per_sel) & dma_en;
+assign      dma_ready     = ~dbg_mem_en &  (ext_dmem_en  | ext_pmem_en  | ext_per_en | dma_resp);
+
+// ===== DEPENDENCY PATHS =====
+// Path: pmem_cen
+// Path: pmem_cen -> pmem_addr
+
+
+===== TARGET: cpu_en =====
+
+// ===== RTL LOGIC =====
+always @ (posedge dma_mclk or posedge puc_rst)
+  if (puc_rst)          bcsctl2  <=  8'h00;
+  else if (bcsctl2_wr)  bcsctl2  <=  bcsctl2_nxt & ( sels_mask  | divsx_mask |
+                                                     selmx_mask | divmx_mask); // Mask unused bits
+
+
+//============================================================================
+// 4) DATA OUTPUT GENERATION
+//============================================================================
+
+// Data output mux
+wire [15:0] bcsctl1_rd   = {8'h00, (bcsctl1  & {8{reg_rd[BCSCTL1]}})}  << (8 & {4{BCSCTL1[0]}});
+wire [15:0] bcsctl2_rd   = {8'h00, (bcsctl2  & {8{reg_rd[BCSCTL2]}})}  << (8 & {4{BCSCTL2[0]}});
+
+wire [15:0] per_dout =  bcsctl1_rd   |
+                        bcsctl2_rd;
+
+
+//=============================================================================
+// 5)  DCO_CLK / LFXT_CLK INTERFACES (WAKEUP, ENABLE, ...)
+//=============================================================================
+
+`ifdef ASIC_CLOCKING
+   wire cpuoff_and_mclk_enable;
+   wire cpuoff_and_mclk_dma_enable;
+   wire cpuoff_and_mclk_dma_wkup;
+  `ifdef CPUOFF_EN
+   omsp_and_gate and_cpuoff_mclk_en       (.y(cpuoff_and_mclk_enable),     .a(cpuoff),               .b(mclk_enable));
+    `ifdef DMA_IF_EN
+   omsp_and_gate and_cpuoff_mclk_dma_en   (.y(cpuoff_and_mclk_dma_enable), .a(bcsctl1[`DMA_CPUOFF]), .b(mclk_dma_enable));
+   omsp_and_gate and_cpuoff_mclk_dma_wkup (.y(cpuoff_and_mclk_dma_wkup),   .a(bcsctl1[`DMA_CPUOFF]), .b(mclk_dma_wkup));
+    `else
+   assign cpuoff_and_mclk_dma_enable  = 1'b0;
+   assign cpuoff_and_mclk_dma_wkup    = 1'b0;
+    `end
+always @ (posedge nodiv_mclk or posedge por)
+  if (por) lfxt_clk_dly <=  1'b0;
+  else     lfxt_clk_dly <=  lfxt_clk_s;
+
+wire   lfxt_clk_en = (lfxt_clk_s & ~lfxt_clk_dly) & (~oscoff | (mclk_dma_enable & bcsctl1[`DMA_OSCOFF]));
+assign lfxt_enable = 1'b1;
+assign lfxt_wkup   = 1'b0;
+`end
+always @ (posedge wdt_clk_cnt or posedge wdt_rst)
+  if (wdt_rst)         wdt_evt_toggle <= 1'b0;
+  else if (wdtqn_edge) wdt_evt_toggle <= ~wdt_evt_toggle;
+
+// Synchronize in the MCLK domain
+wire       wdt_evt_toggle_sync;
+omsp_sync_cell sync_cell_wdt_evt (
+    .data_out  (wdt_evt_toggle_sync),
+    .data_in   (wdt_evt_toggle),
+    .clk       (mclk),
+    .rst       (puc_rst)
+);
+
+// Delay for edge detection of the toggle bit
+reg        wdt_evt_toggle_sync_dly;
+always @ (posedge mclk or posedge puc_rst)
+  if (puc_rst) wdt_evt_toggle_sync_dly <= 1'b0;
+  else         wdt_evt_toggle_sync_dly <= wdt_evt_toggle_sync;
+
+wire       wdtifg_evt =  (wdt_evt_toggle_sync_dly ^ wdt_evt_toggle_sync) | wdtpw_error;
+
+
+// Watchdog wakeup generation
+//-------------------------------------------------------------
+
+// Clear wakeup when the watchdog flag is cleared (glitch free)
+reg  wdtifg_clr_reg;
+wire wdtifg_clr;
+always @ (posedge mclk or posedge puc_rst)
+  if (puc_rst) wdtifg_clr_reg <= 1'b1;
+  else         wdtifg_clr_reg <= wdtifg_clr;
+
+// Set wakeup when the watchdog event is detected (glitch free)
+reg  wdtqn_edge_reg;
+always @ (posedge wdt_clk_cnt or posedge wdt_rst)
+  if (wdt_rst) wdtqn_edge_reg <= 1'b0;
+  else         wdtqn_edge_reg <= wdtqn_edge;
+
+// Watchdog wakeup cell
+wire wdt_wkup_pre;
+omsp_wakeup_cell wakeup_cell_wdog (
+                                   .wkup_out   (wdt_wkup_pre),    // Wakup signal (asynchronous)
+                                   .scan_clk   (mclk),            // Scan clock
+                                   .scan_mode  (scan_mode),       // Scan mode
+                                   .scan_rst   (puc_rst),         // Scan reset
+                                   .wkup_clear (wdtifg_clr_reg),  // Glitch free wakeup event clear
+                                   .wkup_event (wdtqn_edge_reg)   // Glitch free asynchronous wakeup event
+);
+
+// When not in HOLD, the watchdog can generate a wakeup when:
+//     - in interval mode (if interrupts are enabled)
+//     - in reset mode (always)
+reg  wdt_wkup_en;
+always @ (posedge mclk or posedge puc_rst)
+  if (puc_rst) wdt_wkup_en <= 1'b0;
+  else         wdt_wkup_en <= ~wdtctl[7] & (~wdttmsel | (wdttmsel & wdtie));
+
+// Make wakeup when not enabled
+wire wdt_wkup;
+omsp_and_gate and_wdt_wkup (.y(wdt_wkup), .a(wdt_wkup_pre), .b(wdt_wkup_en));
+
+
+// Watchdog interrupt flag
+//------------------------------
+reg        wdtifg;
+
+wire       wdtifg_set =  wdtifg_evt                  |  wdtifg_sw_set;
+assign     wdtifg_clr =  (wdtifg_irq_clr & wdttmsel) |  wdtifg_sw_clr;
+
+always @ (posedge mclk or posedge por)
+  if (por)             wdtifg <=  1'b0;
+  else if (wdtifg_set) wdtifg <=  1'b1;
+  else if (wdtifg_clr) wdtifg <=  1'b0;
+
+
+// Watchdog interrupt generation
+//---------------------------------
+wire    wdt_irq       = wdttmsel & wdtifg & wdtie;
+
+
+// Watchdog reset generation
+//-----------------------------
+reg     wdt_reset;
+
+always @ (posedge mclk or posedge por)
+  if (por) wdt_reset <= 1'b0;
+  else     wdt_reset <= wdtpw_error | (wdtifg_set & ~wdttmsel);
+
+
+// LINT cleanup
+wire        UNUSED_smclk_en = smclk_en;
+wire        UNUSED_aclk_en  = aclk_en;
+
+
+//=============================================================================
+// 6)  WATCHDOG TIMER (FPGA IMPLEMENTATION)
+//=============================================================================
+`else
+
+// Watchdog clock source selection
+//---------------------------------
+wire  clk_src_en = wdtctl[2] ? aclk_en : smclk_en;
+
+
+// Watchdog 16 bit counter
+//--------------------------
+reg [15:0] wdtcnt;
+
+wire        wdtifg_evt;
+wire        wdtcnt_clr  = (wdtctl_wr & per_din[3]) | wdtifg_evt;
+wire        wdtcnt_incr = ~wdtctl[7] & clk_src_en & ~dbg_freeze;
+
+wire [15:0] wdtcnt_nxt  = wdtcnt+16'h0001;
+
+always @ (posedge mclk or posedge puc_rst)
+  if (puc_rst)           wdtcnt <= 16'h0000;
+  else if (wdtcnt_clr)   wdtcnt <= 16'h0000;
+  else if (wdtcnt_incr)  wdtcnt <= wdtcnt_nxt;
+
+
+// Interval selection mux
+//--------------------------
+reg        wdtqn;
+
+always @(wdtctl or wdtcnt_nxt)
+    case(wdtctl[1:0])
+      2'b00  : wdtqn =  wdtcnt_nxt[15];
+      2'b01  : wdtqn =  wdtcnt_nxt[13];
+      2'b10  : wdtqn =  wdtcnt_nxt[9];
+      default: wdtqn =  wdtcnt_nxt[6];
+    end
+assign cpu_en_wkup = 1'b0;
+always @(i_state    or inst_sz  or inst_sz_nxt  or pc_sw_wr or exec_done or
+         irq_detect or cpuoff   or cpu_halt_req or e_state)
+    case(i_state)
+      I_IDLE     : i_state_nxt = (irq_detect & ~cpu_halt_req) ? I_IRQ_FETCH :
+                                 (~cpuoff    & ~cpu_halt_req) ? I_DEC       : I_IDLE;
+      I_IRQ_FETCH: i_state_nxt =  I_IRQ_DONE;
+      I_IRQ_DONE : i_state_nxt =  I_DEC;
+      I_DEC      : i_state_nxt =  irq_detect                  ? I_IRQ_FETCH :
+                          (cpuoff | cpu_halt_req) & exec_done ? I_IDLE      :
+                            cpu_halt_req & (e_state==E_IDLE)  ? I_IDLE      :
+                                  pc_sw_wr                    ? I_DEC       :
+                             ~exec_done & ~(e_state==E_IDLE)  ? I_DEC       :        // Wait in decode state
+                                  (inst_sz_nxt!=2'b00)        ? I_EXT1      : I_DEC; // until execution is completed
+      I_EXT1     : i_state_nxt =  pc_sw_wr                    ? I_DEC       :
+                                  (inst_sz!=2'b01)            ? I_EXT2      : I_DEC;
+      I_EXT2     : i_state_nxt =  I_DEC;
+    // pragma coverage off
+      default    : i_state_nxt =  I_IRQ_FETCH;
+    // pragma coverage on
+    end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst) i_state  <= I_IRQ_FETCH;
+  else         i_state  <= i_state_nxt;
+
+// Utility signals
+wire   decode_noirq =  ((i_state==I_DEC) &  (exec_done | (e_state==E_IDLE)));
+wire   decode       =  decode_noirq | irq_detect;
+wire   fetch        = ~((i_state==I_DEC) & ~(exec_done | (e_state==E_IDLE))) & ~(e_state_nxt==E_IDLE);
+
+// Halt/Run CPU status
+reg    cpu_halt_st;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  cpu_halt_st <= 1'b0;
+  else          cpu_halt_st <= cpu_halt_req & (i_state_nxt==I_IDLE);
+
+
+//=============================================================================
+// 4)  INTERRUPT HANDLING & SYSTEM WAKEUP
+//=============================================================================
+
+//
+// 4.1) INTERRUPT HANDLING
+//-----------------------------------------
+
+// Detect reset interrupt
+reg         inst_irq_rst;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)                  inst_irq_rst <= 1'b1;
+  else if (exec_done)           inst_irq_rst <= 1'b0;
+
+//  Detect other interrupts
+assign  irq_detect = (nmi_pnd | ((|irq | wdt_irq) & gie)) & ~cpu_halt_req & ~cpu_halt_st & (exec_done | (i_state==I_IDLE));
+
+`ifdef CLOCK_GATING
+wire       mclk_irq_num;
+omsp_clock_gate clock_gate_irq_num (.gclk(mclk_irq_num),
+                                    .clk (mclk), .enable(irq_detect), .scan_enable(scan_enable));
+`else
+wire       UNUSED_scan_enable = scan_enable;
+wire       mclk_irq_num       = mclk;
+`end
+
+// ===== DEPENDENCY PATHS =====
+// Path: cpu_en
+// Path: cpu_en -> wkup
+
+
+===== TARGET: dmem_wen =====
+
+// ===== RTL LOGIC =====
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)              pmem_dout_bckup_sel <=  1'b0;
+  else if (fe_pmem_save)    pmem_dout_bckup_sel <=  1'b1;
+  else if (fe_pmem_restore) pmem_dout_bckup_sel <=  1'b0;
+
+assign fe_mdb_in = pmem_dout_bckup_sel ? pmem_dout_bckup : pmem_dout;
+
+
+//------------------------------------------
+// Execution-Unit data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg [1:0] eu_mdb_in_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  eu_mdb_in_sel  <= 2'b00;
+  else          eu_mdb_in_sel  <= {eu_pmem_en, eu_per_en};
+
+// Mux
+assign          eu_mdb_in       = eu_mdb_in_sel[1] ? pmem_dout    :
+                                  eu_mdb_in_sel[0] ? per_dout_val : dmem_dout;
+
+
+//------------------------------------------
+// External Master/Debug interface data Mux
+//------------------------------------------
+
+// Select between Peripherals, Program and Data memories
+reg   [1:0] ext_mem_din_sel;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  ext_mem_din_sel <= 2'b00;
+  else          ext_mem_din_sel <= {ext_pmem_en, ext_per_en};
+
+// Mux
+assign          ext_mem_din      = ext_mem_din_sel[1] ? pmem_dout    :
+                                   ext_mem_din_sel[0] ? per_dout_val : dmem_dout;
+
+
+end
+assign      dma_resp      = ~dbg_mem_en & ~(ext_dmem_sel | ext_pmem_sel | ext_per_sel) & dma_en;
+assign      dma_ready     = ~dbg_mem_en &  (ext_dmem_en  | ext_pmem_en  | ext_per_en | dma_resp);
+assign             ext_dmem_en   = ext_mem_en &  ext_dmem_sel & ~eu_dmem_en;
+always @(posedge mclk_pc or posedge puc_rst)
+  if (puc_rst)  pc <= 16'h0000;
+  else          pc <= pc_nxt;
+
+// Check if Program-Memory has been busy in order to retry Program-Memory access
+reg pmem_busy;
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst)  pmem_busy <= 1'b0;
+  else          pmem_busy <= fe_pmem_wait;
+
+// Memory interface
+wire [15:0] mab      = pc_nxt;
+wire        mb_en    = fetch | pc_sw_wr | (i_state==I_IRQ_FETCH) | pmem_busy | (cpu_halt_st & ~cpu_halt_req);
+
+
+//
+// 5.2) INSTRUCTION REGISTER
+//--------------------------------
+
+// Instruction register
+wire [15:0] ir  = mdb_in;
+
+// Detect if source extension word is required
+wire is_sext = (inst_as[`IDX] | inst_as[`SYMB] | inst_as[`ABS] | inst_as[`IMM]);
+
+// For the Symbolic addressing mode, add -2 to the extension word in order
+// to make up for the PC address
+wire [15:0] ext_incr = ((i_state==I_EXT1)     &  inst_as[`SYMB]) |
+                       ((i_state==I_EXT2)     &  inst_ad[`SYMB]) |
+                       ((i_state==I_EXT1)     & ~inst_as[`SYMB] &
+                       ~(i_state_nxt==I_EXT2) &  inst_ad[`SYMB])   ? 16'hfffe : 16'h0000;
+
+wire [15:0] ext_nxt  = ir + ext_incr;
+
+// Store source extension word
+reg [15:0] inst_sext;
+
+`ifdef CLOCK_GATING
+wire       inst_sext_en  = (decode & is_const)                 |
+                           (decode & inst_type_nxt[`INST_JMP]) |
+                           ((i_state==I_EXT1) & is_sext);
+wire       mclk_inst_sext;
+omsp_clock_gate clock_gate_inst_sext (.gclk(mclk_inst_sext),
+                                      .clk (mclk), .enable(inst_sext_en), .scan_enable(scan_enable));
+`else
+wire       mclk_inst_sext = mclk;
+`end
+always @(posedge mclk or posedge puc_rst)
+  if (puc_rst) fe_pmem_en_dly <=  1'b0;
+  else         fe_pmem_en_dly <=  fe_pmem_en;
+
+wire fe_pmem_save    = (~fe_pmem_en &  fe_pmem_en_dly) & ~cpu_halt_st;
+wire fe_pmem_restore = ( fe_pmem_en & ~fe_pmem_en_dly) |  cpu_halt_st;
+
+`ifdef CLOCK_GATING
+wire mclk_bckup_gated;
+omsp_clock_gate clock_gate_bckup (.gclk(mclk_bckup_gated),
+                                  .clk (mclk), .enable(fe_pmem_save), .scan_enable(scan_enable));
+`define MCLK_BCKUP           mclk_bckup_gated
+`else
+wire    UNUSED_scan_enable = scan_enable;
+`define MCLK_BCKUP           mclk        // use macro to solve delta cycle issues with some mixed VHDL/Verilog simulators
+`end
+
+// ===== DEPENDENCY PATHS =====
+// Path: dmem_wen
+// Path: dmem_wen -> pmem_wen
+

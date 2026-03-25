@@ -1,0 +1,66 @@
+
+===== TARGET: mem_data =====
+Cone: ['mem_cnt', 'mem_addr', 'mem_data', 'mem_ctl']
+Paths:
+mem_data
+mem_data -> mem_ctl
+mem_data -> mem_cnt
+mem_data -> mem_addr
+
+===== TARGET: per_addr =====
+Cone: ['per_en', 'per_addr', 'per_we']
+Paths:
+per_addr
+per_addr -> per_en
+per_addr -> per_we
+
+===== TARGET: dmem_cen =====
+Cone: ['pmem_addr', 'pmem_cen', 'pmem_din', 'pmem_wen', 'dmem_cen']
+Paths:
+dmem_cen
+dmem_cen -> pmem_cen
+dmem_cen -> pmem_cen -> pmem_addr
+dmem_cen -> pmem_din
+dmem_cen -> pmem_din -> pmem_wen
+
+===== TARGET: dma_en =====
+Cone: ['dma_priority', 'per_en', 'dma_en', 'dma_wkup']
+Paths:
+dma_en
+dma_en -> per_en
+dma_en -> dma_wkup
+dma_en -> dma_wkup -> dma_priority
+
+===== TARGET: dmem_addr =====
+Cone: ['pmem_addr', 'pmem_cen', 'pmem_din', 'pmem_wen', 'dmem_addr', 'dmem_cen']
+Paths:
+dmem_addr
+dmem_addr -> dmem_cen
+dmem_addr -> dmem_cen -> pmem_cen
+dmem_addr -> dmem_cen -> pmem_cen -> pmem_addr
+dmem_addr -> dmem_cen -> pmem_din
+dmem_addr -> dmem_cen -> pmem_din -> pmem_wen
+
+===== TARGET: pmem_addr =====
+Cone: ['pmem_addr', 'pmem_cen']
+Paths:
+pmem_addr
+pmem_addr -> pmem_cen
+
+===== TARGET: pmem_cen =====
+Cone: ['pmem_addr', 'pmem_cen']
+Paths:
+pmem_cen
+pmem_cen -> pmem_addr
+
+===== TARGET: cpu_en =====
+Cone: ['cpu_en', 'wkup']
+Paths:
+cpu_en
+cpu_en -> wkup
+
+===== TARGET: dmem_wen =====
+Cone: ['dmem_wen', 'pmem_wen']
+Paths:
+dmem_wen
+dmem_wen -> pmem_wen

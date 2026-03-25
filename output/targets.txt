@@ -1,0 +1,9 @@
+mem_data
+per_addr
+dmem_cen
+dma_en
+dmem_addr
+pmem_addr
+pmem_cen
+cpu_en
+dmem_wen

@@ -92,16 +92,19 @@ def clean_kg(kg):
         src = normalize_signal(edge["source"])
         tgt = normalize_signal(edge["target"])
 
-        if not src or not tgt:
+        if src == tgt:
             continue
 
-        if src == tgt:
+        if not src or not tgt:
             continue
 
         if not (is_clean_signal(src) and is_clean_signal(tgt)):
             continue
 
         if not (is_valid_signal(src) and is_valid_signal(tgt)):
+            continue
+
+        if "pmem" in src and "dmem" in tgt:
             continue
 
         # ❌ remove noise-only edges (like clk → everything)

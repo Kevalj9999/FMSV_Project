@@ -37,3 +37,33 @@ def clean_assertions(text):
 
     return "\n\n".join(cleaned)
 
+def remove_invalid_assertions(text):
+    lines = text.split("\n")
+    filtered = []
+
+    for l in lines:
+        if "!= " in l:
+            parts = l.split("!=")
+            if parts[0].strip() == parts[1].strip():
+                continue
+
+        if "== " in l:
+            parts = l.split("==")
+            if parts[0].strip() == parts[1].strip():
+                continue
+
+        filtered.append(l)
+
+    return "\n".join(filtered)
+
+
+def remove_weak_assertions(text):
+    lines = text.split("\n")
+    filtered = []
+
+    for l in lines:
+        if "!= 0" in l and "$past" not in l:
+            continue
+        filtered.append(l)
+
+    return "\n".join(filtered)

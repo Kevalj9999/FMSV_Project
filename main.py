@@ -11,7 +11,7 @@ from parser.signal_mapper import map_graph_to_rtl
 from parser.global_dependency import build_global_graph
 from parser.signal_filter import clean_kg, filter_by_rtl
 from llm.generator import generate_assertions
-from utils.assertion_cleaner import clean_assertions
+from utils.assertion_cleaner import clean_assertions,remove_invalid_assertions,remove_weak_assertions
 
 
 # -------- HELPERS --------
@@ -216,30 +216,45 @@ def main():
             f.write(f"\n===== TARGET: {t} =====\n")
             f.write(context + "\n")
 
-    # # -------- STEP 9: ASSERTIONS --------
-    # output_file = "output/assertions.sv"
+    # -------- STEP 9: ASSERTIONS --------
+    output_file = "output/assertions.sv"
 
-    # with open(output_file, "w") as f:
-    #     for t in targets:
-    #         context = contexts.get(t, "").strip()
-    #         if not context:
-    #             continue
+    with open(output_file, "w") as f:
 
-    #         raw = generate_assertions(
-    #             context,
-    #             graph,
-    #             paths.get(t, []),
-    #             t
-    #         )
+        for t in targets:
+            context = contexts.get(t, "").strip()
 
-    #         cleaned = clean_assertions(raw)
+            if not context:
+                continue
 
-    #         f.write(f"\n// ===== TARGET: {t} =====\n\n")
-    #         f.write(cleaned + "\n")
+            raw = generate_assertions(
+                context,
+                graph,
+                paths.get(t, []),
+                t
+            )
 
-    # print(f"\n✅ All outputs saved in /output folder")
-    # print(f"✅ Assertions: {output_file}")
+            # 🔥 Safety check
+            if not raw or len(raw.strip()) < 10:
+                continue
 
+            cleaned = clean_assertions(raw)
+            cleaned = remove_invalid_assertions(cleaned)
+            cleaned = remove_weak_assertions(cleaned)
+
+            # 🔥 Skip empty after cleaning
+            if not cleaned or len(cleaned.strip()) < 10:
+                continue
+
+            # -------- WRITE --------
+            f.write("\n" + "="*60 + "\n")
+            f.write(f"// TARGET: {t}\n")
+            f.write("="*60 + "\n\n")
+
+            f.write(cleaned.strip() + "\n\n")
+
+    print(f"\n✅ All outputs saved in /output folder")
+    print(f"✅ Assertions: {output_file}")
 
 if __name__ == "__main__":
     main()

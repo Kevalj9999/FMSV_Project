@@ -33,75 +33,139 @@ def generate_assertions(context, graph, paths, target):
     prompt = f"""
 You are a hardware formal verification expert.
 
-Your task is to generate VALID SystemVerilog Assertions (SVA).
+Generate VALID SystemVerilog Assertions (SVA) using ONLY the given dependency information.
 
------------------------------------
+========================================
 STRICT RULES (MANDATORY)
------------------------------------
+========================================
 
-1. Output ONLY valid SystemVerilog (NO explanation)
-2. Use proper syntax:
-   property ... endproperty
-   assert property (...)
+1. Output ONLY SystemVerilog assertions
+   - NO explanation
+   - NO markdown
 
-3. Use ONLY signals present in context or dependencies
-4. DO NOT invent signals like:
-   - some_condition
-   - enable_signal
-   - expected_value
+2. Use ONLY signals explicitly provided
+   - DO NOT invent signals
+   - DO NOT use placeholders like:
+     some_condition, enable_signal, expected_value
 
-5. DO NOT chain implications:
+3. Follow correct syntax:
+   property <name>;
+     @(posedge clk) disable iff (reset)
+     <expression>;
+   endproperty
+   assert property (<name>);
+
+4. DO NOT assume arithmetic behavior
+   - NO +1 / -1 unless signal name clearly implies (count, ptr)
+
+5. DO NOT chain implications
    ❌ a |-> b |-> c
    ✅ a |-> (b && c)
 
-6. DO NOT assume increment/decrement unless clearly implied
-   (only for count/ptr type signals)
+6. DO NOT guess missing logic
+   - If relation is unclear → SKIP
 
-7. Prefer SAFE assertions:
-   - enable conditions
-   - stability (!en -> no change)
-   - valid/ready relationships
-   - dependency checks
+7. RHS of implication MUST be a valid boolean expression:
+   - For data/address signals:
+     use (signal != $past(signal))
 
-8. If unsure → DO NOT generate that assertion
+   - For enable signals:
+     use (signal != 0)
 
------------------------------------
+8. NEVER generate:
+   - signal == signal
+   - signal != signal
+
+9. ALWAYS use $past() for state comparison
+10. Assertion Templates (MANDATORY):
+
+For dependency A -> B:
+
+- If B is a data/address signal:
+  A |-> (B != $past(B))
+
+- If B is an enable/valid signal:
+  A |-> (B != 0)
+
+For stability:
+  !A |-> (B == $past(B))
+
+For multiple dependencies:
+  (A && C) |-> (B != $past(B))
+
+11. Always prefer $past() comparisons for non-boolean signals.
+
+12. Avoid weak assertions like:
+  B != 0 (unless B is clearly a control signal)
+
+13. Only generate A |-> B if A DIRECTLY controls B.
+If unsure, SKIP the assertion.
+
+14. Only generate dependency assertions when the relationship is STRONG and direct.
+    If the dependency is indirect or uncertain, SKIP it.
+
+15. Prefer fewer HIGH-QUALITY assertions over many weak ones.
+
+16. If multiple dependencies exist for a target:
+    - Prefer combining them using (A && C)
+
+17. Avoid generating the same pattern repeatedly across signals.
+
+18. Only generate A |-> B if A directly controls or enables B.
+If relationship is indirect → SKIP.
+    
+========================================
+DEPENDENCY INTERPRETATION
+========================================
+
+- "A -> B" means:
+  A influences or controls B
+
+- VALID assertion patterns:
+
+  (A) |-> (B changes or holds relation)
+  (!A) |-> (B remains stable)
+
+- If multiple dependencies:
+  (A && C) |-> B
+
+========================================
 TARGET
------------------------------------
+========================================
 {target}
 
------------------------------------
-DEPENDENCIES (SPEC GRAPH)
------------------------------------
+========================================
+DEPENDENCIES (GRAPH)
+========================================
 {relations}
 
------------------------------------
+========================================
 DEPENDENCY PATHS
------------------------------------
+========================================
 {path_text}
 
------------------------------------
-RTL CONTEXT
------------------------------------
-{context}
-
------------------------------------
+========================================
 OUTPUT REQUIREMENTS
------------------------------------
+========================================
 
-Generate 3 to 5 HIGH-QUALITY assertions.
+Generate EXACTLY 3 to 5 assertions.
 
-Each assertion must:
-- Be logically correct
-- Be synthesizable SVA style
-- Use @(posedge clk) disable iff (reset)
+Include ONLY these types:
 
-Focus on:
-- enable → behavior
-- dependency → implication
-- no-change conditions
+1. Dependency assertion
+   - cause → effect
 
-DO NOT generate weak or generic assertions.
+2. Stability assertion
+   - no enable → no change
+
+3. Multi-signal dependency (if available)
+
+DO NOT generate:
+- arithmetic updates
+- random enable conditions
+- unrelated assertions
+
+Only generate assertions that are DIRECTLY supported by dependencies.
 """
 
     try:

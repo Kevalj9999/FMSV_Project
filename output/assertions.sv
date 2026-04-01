@@ -9,12 +9,6 @@ property p_mem_ctl_to_mem_data;
 endproperty
 assert property (p_mem_ctl_to_mem_data);
 
-property p_mem_cnt_to_mem_data;
-  @(posedge clk) disable iff (reset)
-  mem_cnt |-> (mem_data != $past(mem_data));
-endproperty
-assert property (p_mem_cnt_to_mem_data);
-
 property p_mem_addr_to_mem_data;
   @(posedge clk) disable iff (reset)
   mem_addr |-> (mem_data != $past(mem_data));
@@ -27,22 +21,16 @@ property p_stability_mem_data;
 endproperty
 assert property (p_stability_mem_data);
 
-property p_multi_dependency_mem_data;
+property p_multi_dependency;
   @(posedge clk) disable iff (reset)
-  (mem_ctl && mem_cnt) |-> (mem_data != $past(mem_data));
+  (mem_ctl && mem_addr) |-> (mem_data != $past(mem_data));
 endproperty
-assert property (p_multi_dependency_mem_data);
+assert property (p_multi_dependency);
 
 
 ============================================================
 // TARGET: per_addr
 ============================================================
-
-property per_en_to_per_addr;
-  @(posedge clk) disable iff (reset)
-  per_en |-> (per_addr != $past(per_addr));
-endproperty
-assert property (per_en_to_per_addr);
 
 property per_we_to_per_addr;
   @(posedge clk) disable iff (reset)
@@ -50,57 +38,28 @@ property per_we_to_per_addr;
 endproperty
 assert property (per_we_to_per_addr);
 
+property per_en_to_per_addr;
+  @(posedge clk) disable iff (reset)
+  per_en |-> (per_addr != $past(per_addr));
+endproperty
+assert property (per_en_to_per_addr);
+
 property stable_per_addr;
   @(posedge clk) disable iff (reset)
   !per_en |-> (per_addr == $past(per_addr));
 endproperty
 assert property (stable_per_addr);
 
-property multi_dependency_per_addr;
+property multi_signal_dependency;
   @(posedge clk) disable iff (reset)
-  (per_en && per_we) |-> (per_addr != $past(per_addr));
+  (per_we && per_en) |-> (per_addr != $past(per_addr));
 endproperty
-assert property (multi_dependency_per_addr);
-
-
-============================================================
-// TARGET: dmem_cen
-============================================================
-
-property pmem_cen_to_dmem_cen;
-  @(posedge clk) disable iff (reset)
-  pmem_cen |-> (dmem_cen != $past(dmem_cen));
-endproperty
-assert property (pmem_cen_to_dmem_cen);
-
-property pmem_din_to_dmem_cen;
-  @(posedge clk) disable iff (reset)
-  pmem_din |-> (dmem_cen != $past(dmem_cen));
-endproperty
-assert property (pmem_din_to_dmem_cen);
-
-property stable_dmem_cen;
-  @(posedge clk) disable iff (reset)
-  !pmem_cen |-> (dmem_cen == $past(dmem_cen));
-endproperty
-assert property (stable_dmem_cen);
-
-property multi_dependency_dmem_cen;
-  @(posedge clk) disable iff (reset)
-  (pmem_cen && pmem_din) |-> (dmem_cen != $past(dmem_cen));
-endproperty
-assert property (multi_dependency_dmem_cen);
+assert property (multi_signal_dependency);
 
 
 ============================================================
 // TARGET: dma_en
 ============================================================
-
-property per_en_to_dma_en;
-  @(posedge clk) disable iff (reset)
-  per_en |-> (dma_en != $past(dma_en));
-endproperty
-assert property (per_en_to_dma_en);
 
 property dma_wkup_to_dma_en;
   @(posedge clk) disable iff (reset)
@@ -108,46 +67,40 @@ property dma_wkup_to_dma_en;
 endproperty
 assert property (dma_wkup_to_dma_en);
 
+property per_en_to_dma_en;
+  @(posedge clk) disable iff (reset)
+  per_en |-> (dma_en != $past(dma_en));
+endproperty
+assert property (per_en_to_dma_en);
+
 property stability_dma_en;
   @(posedge clk) disable iff (reset)
-  !per_en |-> (dma_en == $past(dma_en));
+  !dma_en |-> (dma_en == $past(dma_en));
 endproperty
 assert property (stability_dma_en);
 
-property stability_dma_en_wkup;
+property multi_dependency_dma_en;
   @(posedge clk) disable iff (reset)
-  !dma_wkup |-> (dma_en == $past(dma_en));
+  (dma_wkup && per_en) |-> (dma_en != $past(dma_en));
 endproperty
-assert property (stability_dma_en_wkup);
-
-property multi_dependency;
-  @(posedge clk) disable iff (reset)
-  (per_en && dma_wkup) |-> (dma_en != $past(dma_en));
-endproperty
-assert property (multi_dependency);
+assert property (multi_dependency_dma_en);
 
 
 ============================================================
 // TARGET: dmem_addr
 ============================================================
 
-property dmem_cen_to_dmem_addr;
+property p_dmem_cen_to_dmem_addr;
   @(posedge clk) disable iff (reset)
   dmem_cen |-> (dmem_addr != $past(dmem_addr));
 endproperty
-assert property (dmem_cen_to_dmem_addr);
+assert property (p_dmem_cen_to_dmem_addr);
 
-property not_dmem_cen_stability;
+property p_not_dmem_cen_stability;
   @(posedge clk) disable iff (reset)
   !dmem_cen |-> (dmem_addr == $past(dmem_addr));
 endproperty
-assert property (not_dmem_cen_stability);
-
-property dmem_cen_and_dmem_addr_to_pmem_cen;
-  @(posedge clk) disable iff (reset)
-  (dmem_addr && dmem_cen) |-> (pmem_cen != $past(pmem_cen));
-endproperty
-assert property (dmem_cen_and_dmem_addr_to_pmem_cen);
+assert property (p_not_dmem_cen_stability);
 
 
 ============================================================
@@ -174,58 +127,64 @@ assert property (pmem_addr_stability);
 
 
 ============================================================
-// TARGET: pmem_cen
+// TARGET: aclk_en
 ============================================================
 
-property pmem_addr_to_pmem_cen;
+property cpu_en_to_aclk_en;
   @(posedge clk) disable iff (reset)
-  (pmem_addr != $past(pmem_addr)) |-> (pmem_cen != $past(pmem_cen));
+  cpu_en |-> (aclk_en != $past(aclk_en));
 endproperty
-assert property (pmem_addr_to_pmem_cen);
+assert property (cpu_en_to_aclk_en);
 
-property pmem_cen_stability;
+property stable_aclk_en;
   @(posedge clk) disable iff (reset)
-  !pmem_cen |-> (pmem_cen == $past(pmem_cen));
+  !cpu_en |-> (aclk_en == $past(aclk_en));
 endproperty
-assert property (pmem_cen_stability);
+assert property (stable_aclk_en);
 
-property pmem_addr_and_pmem_cen;
+property multi_dependency_aclk_en;
   @(posedge clk) disable iff (reset)
-  (pmem_addr && pmem_cen) |-> (pmem_cen != $past(pmem_cen));
+  (cpu_en && aclk_en) |-> (aclk_en != $past(aclk_en));
 endproperty
-assert property (pmem_addr_and_pmem_cen);
+assert property (multi_dependency_aclk_en);
 
 
 ============================================================
 // TARGET: cpu_en
 ============================================================
 
-property p1;
+property p_wkup_to_cpu_en;
   @(posedge clk) disable iff (reset)
   wkup |-> (cpu_en != $past(cpu_en));
 endproperty
-assert property (p1);
+assert property (p_wkup_to_cpu_en);
 
-property p2;
+property p_stability_cpu_en;
   @(posedge clk) disable iff (reset)
   !wkup |-> (cpu_en == $past(cpu_en));
 endproperty
-assert property (p2);
+assert property (p_stability_cpu_en);
 
 
 ============================================================
-// TARGET: dmem_wen
+// TARGET: dco_enable
 ============================================================
 
-property pmem_wen_to_dmem_wen;
+property cpu_en_to_dco_enable;
   @(posedge clk) disable iff (reset)
-  pmem_wen |-> (dmem_wen != $past(dmem_wen));
+  cpu_en |-> (dco_enable != $past(dco_enable));
 endproperty
-assert property (pmem_wen_to_dmem_wen);
+assert property (cpu_en_to_dco_enable);
 
-property stable_dmem_wen;
+property no_cpu_en_stability;
   @(posedge clk) disable iff (reset)
-  !pmem_wen |-> (dmem_wen == $past(dmem_wen));
+  !cpu_en |-> (dco_enable == $past(dco_enable));
 endproperty
-assert property (stable_dmem_wen);
+assert property (no_cpu_en_stability);
+
+property multi_signal_dependency;
+  @(posedge clk) disable iff (reset)
+  (dco_enable && cpu_en) |-> (cpu_en != $past(cpu_en));
+endproperty
+assert property (multi_signal_dependency);
 

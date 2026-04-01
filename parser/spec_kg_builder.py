@@ -31,6 +31,7 @@ def clean_graph(graph):
 
         cleaned[target] = list(set(valid_deps))
 
+
     return cleaned
 
 def safe_json_parse(text):

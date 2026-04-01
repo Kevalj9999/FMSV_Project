@@ -131,17 +131,3 @@ def parse_rtl(file_list, incremental=True):
             preprocess_define=[]
         )
         return ast
-    
-import os
-
-def load_rtl_files(folder):
-    rtl_data = {}
-
-    for root, _, files in os.walk(folder):
-        for file in files:
-            if file.endswith(".v"):
-                path = os.path.join(root, file)
-                with open(path, "r") as f:
-                    rtl_data[file] = f.read()
-
-    return rtl_data

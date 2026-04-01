@@ -5,14 +5,10 @@ from parser.rtl_parser import parse_rtl
 from parser.cone_extractor import extract_smart_cone
 from parser.context_builder import build_context
 from parser.signal_extractor import extract_signals
-from parser.module_extractor import extract_modules
-from parser.instance_extractor import extract_instances
-from parser.signal_mapper import map_graph_to_rtl
-from parser.global_dependency import build_global_graph
-from parser.signal_filter import clean_kg, filter_by_rtl
 from llm.generator import generate_assertions
 from utils.assertion_cleaner import clean_assertions,remove_invalid_assertions,remove_weak_assertions
-
+from parser.signal_filter import filter_by_rtl,clean_kg
+from parser.semantic_mapper import map_spec_to_rtl_semantic
 
 # -------- HELPERS --------
 
@@ -98,30 +94,30 @@ def main():
             f.write(s + "\n")
 
     # -------- STEP 4: SPEC KG --------
-    # from parser.spec_kg_builder import build_spec_kg, kg_to_graph, clean_graph
+    from parser.spec_kg_builder import build_spec_kg, kg_to_graph, clean_graph
 
-    # kg = build_spec_kg(spec_text)
-    # kg = clean_kg(kg)
-    # kg = filter_by_rtl(kg, rtl_signals)
+    kg = build_spec_kg(spec_text)
+    kg = clean_kg(kg)
+    kg = filter_by_rtl(kg, rtl_signals)
 
-    # with open("output/kg.txt", "w") as f:
-    #     f.write(str(kg))
+    with open("output/kg.txt", "w") as f:
+        f.write(str(kg))
 
-    # graph = clean_graph(kg_to_graph(kg))
+    graph = clean_graph(kg_to_graph(kg))
 
-    # with open("output/graph.txt", "w") as f:
-    #     for k, v in graph.items():
-    #         f.write(f"{k} ← {v}\n")
+    with open("output/graph.txt", "w") as f:
+        for k, v in graph.items():
+            f.write(f"{k} ← {v}\n")
 
     # -------- STEP 4: LOAD PREBUILT KG + GRAPH --------
 
-    print("\nLoading KG and Graph from files...\n")
+    # print("\nLoading KG and Graph from files...\n")
 
-    kg = load_kg("output/kg.txt")
-    graph = load_graph("output/graph.txt")
+    # kg = load_kg("output/kg.txt")
+    # graph = load_graph("output/graph.txt")
 
-    print(f"KG nodes: {len(kg['nodes'])}")
-    print(f"Graph nodes: {len(graph)}")
+    # print(f"KG nodes: {len(kg['nodes'])}")
+    # print(f"Graph nodes: {len(graph)}")
 
     # -------- STEP 5: TARGETS --------
 
@@ -168,10 +164,9 @@ def main():
 
     CLOCK_KEYWORDS = ["clk", "aclk", "smclk", "dco", "lfxt"]
 
-    targets = [
-        t for t in targets
-        if not any(k in t for k in CLOCK_KEYWORDS)
-    ]
+    if len(targets) < 10:
+        extra = [n for n, _ in candidates if n not in targets]
+        targets.extend(extra[:10 - len(targets)])
 
 
     # -------- SAVE --------

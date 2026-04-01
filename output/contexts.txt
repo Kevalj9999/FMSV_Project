@@ -7,7 +7,7 @@ mem_data
 // ===== DEPENDENCY PATHS =====
 // Path: mem_data
 // Path: mem_data -> mem_ctl
-// Path: mem_data -> mem_cnt
+// Path: mem_data -> mem_ctl -> mem_cnt
 // Path: mem_data -> mem_addr
 
 
@@ -20,19 +20,6 @@ per_addr
 // Path: per_addr
 // Path: per_addr -> per_en
 // Path: per_addr -> per_we
-
-
-===== TARGET: dmem_cen =====
-
-// ===== TARGET =====
-dmem_cen
-
-// ===== DEPENDENCY PATHS =====
-// Path: dmem_cen
-// Path: dmem_cen -> pmem_cen
-// Path: dmem_cen -> pmem_cen -> pmem_addr
-// Path: dmem_cen -> pmem_din
-// Path: dmem_cen -> pmem_din -> pmem_wen
 
 
 ===== TARGET: dma_en =====
@@ -55,9 +42,6 @@ dmem_addr
 // ===== DEPENDENCY PATHS =====
 // Path: dmem_addr
 // Path: dmem_addr -> dmem_cen
-// Path: dmem_addr -> dmem_cen -> pmem_cen
-// Path: dmem_addr -> dmem_cen -> pmem_cen -> pmem_addr
-// Path: dmem_addr -> dmem_cen -> pmem_din
 
 
 ===== TARGET: pmem_addr =====
@@ -70,14 +54,15 @@ pmem_addr
 // Path: pmem_addr -> pmem_cen
 
 
-===== TARGET: pmem_cen =====
+===== TARGET: aclk_en =====
 
 // ===== TARGET =====
-pmem_cen
+aclk_en
 
 // ===== DEPENDENCY PATHS =====
-// Path: pmem_cen
-// Path: pmem_cen -> pmem_addr
+// Path: aclk_en
+// Path: aclk_en -> cpu_en
+// Path: aclk_en -> cpu_en -> wkup
 
 
 ===== TARGET: cpu_en =====
@@ -90,12 +75,13 @@ cpu_en
 // Path: cpu_en -> wkup
 
 
-===== TARGET: dmem_wen =====
+===== TARGET: dco_enable =====
 
 // ===== TARGET =====
-dmem_wen
+dco_enable
 
 // ===== DEPENDENCY PATHS =====
-// Path: dmem_wen
-// Path: dmem_wen -> pmem_wen
+// Path: dco_enable
+// Path: dco_enable -> cpu_en
+// Path: dco_enable -> cpu_en -> wkup
 

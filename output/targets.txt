@@ -1,8 +1,10 @@
 mem_data
 per_addr
-dma_en
+cpuoff_and_mclk_enable
+wkup_event
 dmem_addr
 pmem_addr
-aclk_en
-cpu_en
 dco_enable
+cpu_en
+lfxt_enable
+mclk_dma_enable

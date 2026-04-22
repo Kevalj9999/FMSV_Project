@@ -1,37 +1,36 @@
 
-===== TARGET: mem_data =====
+===== TARGET: dco_disable_by_cpu_en =====
 
 // ===== TARGET =====
-mem_data
+dco_disable_by_cpu_en
 
 // ===== DEPENDENCY PATHS =====
-// Path: mem_data
-// Path: mem_data -> mem_ctl
-// Path: mem_data -> mem_ctl -> mem_cnt
-// Path: mem_data -> mem_addr
+// Path: dco_disable_by_cpu_en
+// Path: dco_disable_by_cpu_en -> cpu_en_wkup
+// Path: dco_disable_by_cpu_en -> cpu_en_wkup -> wkup_clear
+// Path: dco_disable_by_cpu_en -> cpu_enabled_with_dco
+// Path: dco_disable_by_cpu_en -> cpu_enabled_with_dco -> cpu_en_wkup
 
 
-===== TARGET: per_addr =====
+===== TARGET: wkup_event =====
 
 // ===== TARGET =====
-per_addr
+wkup_event
 
 // ===== DEPENDENCY PATHS =====
-// Path: per_addr
-// Path: per_addr -> per_en
-// Path: per_addr -> per_we
+// Path: wkup_event
+// Path: wkup_event -> wkup_clear
 
 
-===== TARGET: dma_en =====
+===== TARGET: cpuoff_and_mclk_enable =====
 
 // ===== TARGET =====
-dma_en
+cpuoff_and_mclk_enable
 
 // ===== DEPENDENCY PATHS =====
-// Path: dma_en
-// Path: dma_en -> per_en
-// Path: dma_en -> dma_wkup
-// Path: dma_en -> dma_wkup -> dma_priority
+// Path: cpuoff_and_mclk_enable
+// Path: cpuoff_and_mclk_enable -> cpuoff
+// Path: cpuoff_and_mclk_enable -> scg1
 
 
 ===== TARGET: dmem_addr =====
@@ -41,7 +40,7 @@ dmem_addr
 
 // ===== DEPENDENCY PATHS =====
 // Path: dmem_addr
-// Path: dmem_addr -> dmem_cen
+// Path: dmem_addr -> dma_mclk
 
 
 ===== TARGET: pmem_addr =====
@@ -51,18 +50,40 @@ pmem_addr
 
 // ===== DEPENDENCY PATHS =====
 // Path: pmem_addr
-// Path: pmem_addr -> pmem_cen
+// Path: pmem_addr -> mclk_irq_num
 
 
-===== TARGET: aclk_en =====
+===== TARGET: lfxt_enable =====
 
 // ===== TARGET =====
-aclk_en
+lfxt_enable
 
 // ===== DEPENDENCY PATHS =====
-// Path: aclk_en
-// Path: aclk_en -> cpu_en
-// Path: aclk_en -> cpu_en -> wkup
+// Path: lfxt_enable
+// Path: lfxt_enable -> lfxt_disable_by_cpu_en
+// Path: lfxt_enable -> lfxt_disable_by_cpu_en -> cpu_en_wkup
+// Path: lfxt_enable -> lfxt_disable_by_cpu_en -> cpu_en_wkup -> wkup_clear
+
+
+===== TARGET: cpu_en_wkup =====
+
+// ===== TARGET =====
+cpu_en_wkup
+
+// ===== DEPENDENCY PATHS =====
+// Path: cpu_en_wkup
+// Path: cpu_en_wkup -> wkup_clear
+
+
+===== TARGET: cpu_enabled_with_dco =====
+
+// ===== TARGET =====
+cpu_enabled_with_dco
+
+// ===== DEPENDENCY PATHS =====
+// Path: cpu_enabled_with_dco
+// Path: cpu_enabled_with_dco -> cpu_en_wkup
+// Path: cpu_enabled_with_dco -> cpu_en_wkup -> wkup_clear
 
 
 ===== TARGET: cpu_en =====
@@ -72,16 +93,17 @@ cpu_en
 
 // ===== DEPENDENCY PATHS =====
 // Path: cpu_en
-// Path: cpu_en -> wkup
+// Path: cpu_en -> cpu_en_wkup
+// Path: cpu_en -> cpu_en_wkup -> wkup_clear
 
 
-===== TARGET: dco_enable =====
+===== TARGET: lfxt_disable_by_cpu_en =====
 
 // ===== TARGET =====
-dco_enable
+lfxt_disable_by_cpu_en
 
 // ===== DEPENDENCY PATHS =====
-// Path: dco_enable
-// Path: dco_enable -> cpu_en
-// Path: dco_enable -> cpu_en -> wkup
+// Path: lfxt_disable_by_cpu_en
+// Path: lfxt_disable_by_cpu_en -> cpu_en_wkup
+// Path: lfxt_disable_by_cpu_en -> cpu_en_wkup -> wkup_clear
 

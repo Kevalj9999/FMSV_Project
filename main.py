@@ -98,12 +98,33 @@ def main():
 
     kg = build_spec_kg(spec_text)
     kg = clean_kg(kg)
+    print("\nBuilding semantic mapping...\n")
+
+    semantic_map = map_spec_to_rtl_semantic(kg, rtl_signals)
+
+    # Save mapping
+    with open("output/semantic_map.txt", "w") as f:
+        for k, v in semantic_map.items():
+            f.write(f"{k} -> {v}\n")
+            
     kg = filter_by_rtl(kg, rtl_signals)
 
     with open("output/kg.txt", "w") as f:
         f.write(str(kg))
 
-    graph = clean_graph(kg_to_graph(kg))
+    raw_graph = kg_to_graph(kg)
+
+    graph = {}
+
+    for tgt, deps in raw_graph.items():
+        mapped_tgt = semantic_map.get(tgt, tgt)
+
+        mapped_deps = [
+            semantic_map.get(d, d)
+            for d in deps
+        ]
+
+        graph[mapped_tgt] = mapped_deps
 
     with open("output/graph.txt", "w") as f:
         for k, v in graph.items():
@@ -177,79 +198,79 @@ def main():
     print(f"Selected {len(targets)} targets")
 
     # -------- STEP 7: CONES --------
-    cones = {}
-    paths = {}
+    # cones = {}
+    # paths = {}
 
-    with open("output/cones.txt", "w") as f:
-        for t in targets:
-            base = strip(t)
-            result = extract_smart_cone(graph, base)
+    # with open("output/cones.txt", "w") as f:
+    #     for t in targets:
+    #         base = strip(t)
+    #         result = extract_smart_cone(graph, base)
 
-            cones[t] = result["cone"]
-            paths[t] = result["paths"]
+    #         cones[t] = result["cone"]
+    #         paths[t] = result["paths"]
 
-            f.write(f"\n===== TARGET: {t} =====\n")
-            f.write(f"Cone: {cones[t]}\n")
-            f.write("Paths:\n")
-            for p in paths[t]:
-                f.write(" -> ".join(p) + "\n")
+    #         f.write(f"\n===== TARGET: {t} =====\n")
+    #         f.write(f"Cone: {cones[t]}\n")
+    #         f.write("Paths:\n")
+    #         for p in paths[t]:
+    #             f.write(" -> ".join(p) + "\n")
 
-    # -------- STEP 8: CONTEXT --------
-    contexts = {}
+    # # -------- STEP 8: CONTEXT --------
+    # contexts = {}
 
-    with open("output/contexts.txt", "w") as f:
-        for t in targets:
-            context = build_context(
-                rtl_code,
-                cones.get(t, []),
-                t,
-                paths.get(t, [])
-            )
+    # with open("output/contexts.txt", "w") as f:
+    #     for t in targets:
+    #         context = build_context(
+    #             rtl_code,
+    #             cones.get(t, []),
+    #             t,
+    #             paths.get(t, [])
+    #         )
 
-            contexts[t] = context
+    #         contexts[t] = context
 
-            f.write(f"\n===== TARGET: {t} =====\n")
-            f.write(context + "\n")
+    #         f.write(f"\n===== TARGET: {t} =====\n")
+    #         f.write(context + "\n")
 
-    # -------- STEP 9: ASSERTIONS --------
-    output_file = "output/assertions.sv"
+    # # -------- STEP 9: ASSERTIONS --------
+    # output_file = "output/assertions.sv"
 
-    with open(output_file, "w") as f:
+    # with open(output_file, "w") as f:
 
-        for t in targets:
-            context = contexts.get(t, "").strip()
+    #     for t in targets:
+    #         context = contexts.get(t, "").strip()
 
-            if not context:
-                continue
+    #         if not context:
+    #             continue
 
-            raw = generate_assertions(
-                context,
-                graph,
-                paths.get(t, []),
-                t
-            )
+    #         raw = generate_assertions(
+    #             context,
+    #             graph,
+    #             paths.get(t, []),
+    #             t
+    #         )
 
-            # 🔥 Safety check
-            if not raw or len(raw.strip()) < 10:
-                continue
+    #         # 🔥 Safety check
+    #         if not raw or len(raw.strip()) < 10:
+    #             continue
 
-            cleaned = clean_assertions(raw)
-            cleaned = remove_invalid_assertions(cleaned)
-            cleaned = remove_weak_assertions(cleaned)
+    #         cleaned = clean_assertions(raw)
+    #         cleaned = remove_invalid_assertions(cleaned)
+    #         cleaned = remove_weak_assertions(cleaned)
 
-            # 🔥 Skip empty after cleaning
-            if not cleaned or len(cleaned.strip()) < 10:
-                continue
+    #         # 🔥 Skip empty after cleaning
+    #         if not cleaned or len(cleaned.strip()) < 10:
+    #             continue
 
-            # -------- WRITE --------
-            f.write("\n" + "="*60 + "\n")
-            f.write(f"// TARGET: {t}\n")
-            f.write("="*60 + "\n\n")
+    #         # -------- WRITE --------
+    #         f.write("\n" + "="*60 + "\n")
+    #         f.write(f"// TARGET: {t}\n")
+    #         f.write("="*60 + "\n\n")
 
-            f.write(cleaned.strip() + "\n\n")
+    #         f.write(cleaned.strip() + "\n\n")
 
     print(f"\n✅ All outputs saved in /output folder")
-    print(f"✅ Assertions: {output_file}")
+    # print(f"✅ Assertions: {output_file}")
 
 if __name__ == "__main__":
     main()

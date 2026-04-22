@@ -1,55 +1,70 @@
 
-===== TARGET: mem_data =====
-Cone: ['mem_ctl', 'mem_cnt', 'mem_data', 'mem_addr']
+===== TARGET: dco_disable_by_cpu_en =====
+Cone: ['cpu_en_wkup', 'cpu_enabled_with_dco', 'wkup_clear', 'dco_disable_by_cpu_en']
 Paths:
-mem_data
-mem_data -> mem_ctl
-mem_data -> mem_ctl -> mem_cnt
-mem_data -> mem_addr
+dco_disable_by_cpu_en
+dco_disable_by_cpu_en -> cpu_en_wkup
+dco_disable_by_cpu_en -> cpu_en_wkup -> wkup_clear
+dco_disable_by_cpu_en -> cpu_enabled_with_dco
+dco_disable_by_cpu_en -> cpu_enabled_with_dco -> cpu_en_wkup
+dco_disable_by_cpu_en -> cpu_enabled_with_dco -> cpu_en_wkup -> wkup_clear
 
-===== TARGET: per_addr =====
-Cone: ['per_we', 'per_addr', 'per_en']
+===== TARGET: wkup_event =====
+Cone: ['wkup_clear', 'wkup_event']
 Paths:
-per_addr
-per_addr -> per_en
-per_addr -> per_we
+wkup_event
+wkup_event -> wkup_clear
 
-===== TARGET: dma_en =====
-Cone: ['dma_wkup', 'dma_priority', 'per_en', 'dma_en']
+===== TARGET: cpuoff_and_mclk_enable =====
+Cone: ['cpuoff', 'scg1', 'cpuoff_and_mclk_enable']
 Paths:
-dma_en
-dma_en -> per_en
-dma_en -> dma_wkup
-dma_en -> dma_wkup -> dma_priority
+cpuoff_and_mclk_enable
+cpuoff_and_mclk_enable -> cpuoff
+cpuoff_and_mclk_enable -> scg1
 
 ===== TARGET: dmem_addr =====
-Cone: ['dmem_cen', 'dmem_addr']
+Cone: ['dmem_addr']
 Paths:
 dmem_addr
-dmem_addr -> dmem_cen
+dmem_addr -> dma_mclk
 
 ===== TARGET: pmem_addr =====
-Cone: ['pmem_cen', 'pmem_addr']
+Cone: ['pmem_addr', 'mclk_irq_num']
 Paths:
 pmem_addr
-pmem_addr -> pmem_cen
+pmem_addr -> mclk_irq_num
 
-===== TARGET: aclk_en =====
-Cone: ['wkup', 'cpu_en', 'aclk_en']
+===== TARGET: lfxt_enable =====
+Cone: ['cpu_en_wkup', 'lfxt_enable', 'wkup_clear', 'lfxt_disable_by_cpu_en']
 Paths:
-aclk_en
-aclk_en -> cpu_en
-aclk_en -> cpu_en -> wkup
+lfxt_enable
+lfxt_enable -> lfxt_disable_by_cpu_en
+lfxt_enable -> lfxt_disable_by_cpu_en -> cpu_en_wkup
+lfxt_enable -> lfxt_disable_by_cpu_en -> cpu_en_wkup -> wkup_clear
+
+===== TARGET: cpu_en_wkup =====
+Cone: ['cpu_en_wkup', 'wkup_clear']
+Paths:
+cpu_en_wkup
+cpu_en_wkup -> wkup_clear
+
+===== TARGET: cpu_enabled_with_dco =====
+Cone: ['cpu_en_wkup', 'cpu_enabled_with_dco', 'wkup_clear']
+Paths:
+cpu_enabled_with_dco
+cpu_enabled_with_dco -> cpu_en_wkup
+cpu_enabled_with_dco -> cpu_en_wkup -> wkup_clear
 
 ===== TARGET: cpu_en =====
-Cone: ['wkup', 'cpu_en']
+Cone: ['cpu_en_wkup', 'wkup_clear', 'cpu_en']
 Paths:
 cpu_en
-cpu_en -> wkup
+cpu_en -> cpu_en_wkup
+cpu_en -> cpu_en_wkup -> wkup_clear
 
-===== TARGET: dco_enable =====
-Cone: ['dco_enable', 'wkup', 'cpu_en']
+===== TARGET: lfxt_disable_by_cpu_en =====
+Cone: ['cpu_en_wkup', 'wkup_clear', 'lfxt_disable_by_cpu_en']
 Paths:
-dco_enable
-dco_enable -> cpu_en
-dco_enable -> cpu_en -> wkup
+lfxt_disable_by_cpu_en
+lfxt_disable_by_cpu_en -> cpu_en_wkup
+lfxt_disable_by_cpu_en -> cpu_en_wkup -> wkup_clear

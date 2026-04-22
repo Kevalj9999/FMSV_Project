@@ -1,19 +1,28 @@
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# Load once (global)
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
-# -------- BUILD EMBEDDINGS --------
+# -------- EMBEDDING --------
 def embed_text(text):
     return model.encode([text])[0]
 
 
-# -------- SPEC SIGNAL DESCRIPTIONS --------
+# -------- TOKEN MATCH (CRITICAL FIX) --------
+def token_overlap(a, b):
+    tokens_a = set(a.split("_"))
+    tokens_b = set(b.split("_"))
+    return len(tokens_a & tokens_b)
+
+
+def is_safe_mapping(spec_sig, rtl_sig, min_overlap=1):
+    return token_overlap(spec_sig, rtl_sig) >= min_overlap
+
+
+# -------- SPEC DESCRIPTIONS --------
 def build_spec_descriptions(kg):
-    """
-    Create simple descriptions for spec signals
-    """
     descriptions = {}
 
     for edge in kg["edges"]:
@@ -26,30 +35,33 @@ def build_spec_descriptions(kg):
 
         descriptions[tgt].append(f"{src} {rel} {tgt}")
 
-    # join sentences
     return {
         k: " ".join(v)
         for k, v in descriptions.items()
     }
 
 
-# -------- RTL SIGNAL DESCRIPTIONS --------
+# -------- RTL DESCRIPTIONS --------
 def build_rtl_descriptions(rtl_signals):
-    """
-    Very simple for now (can improve later)
-    """
     return {
         s: s.replace("_", " ")
         for s in rtl_signals
     }
 
 
-# -------- SEMANTIC MATCHING --------
-def map_spec_to_rtl_semantic(kg, rtl_signals, threshold=0.5):
+# -------- MAIN MAPPING --------
+def map_spec_to_rtl_semantic(kg, rtl_signals, threshold=0.75):
+    """
+    Improved semantic mapping with:
+    - strict similarity threshold
+    - token validation
+    - safe fallback
+    """
 
     spec_desc = build_spec_descriptions(kg)
     rtl_desc = build_rtl_descriptions(rtl_signals)
 
+    # Precompute RTL embeddings
     rtl_embeddings = {
         s: embed_text(desc)
         for s, desc in rtl_desc.items()
@@ -70,7 +82,16 @@ def map_spec_to_rtl_semantic(kg, rtl_signals, threshold=0.5):
                 best_score = score
                 best_match = rtl_sig
 
-        if best_score > threshold:
-            mapping[spec_sig] = best_match
+        # -------- STRICT FILTERING --------
+        if best_match:
+            overlap = token_overlap(spec_sig, best_match)
+
+            if best_score >= threshold and overlap >= 1:
+                mapping[spec_sig] = best_match
+            else:
+                # ❗ IMPORTANT: keep original (DO NOT MAP)
+                mapping[spec_sig] = spec_sig
+        else:
+            mapping[spec_sig] = spec_sig
 
     return mapping
